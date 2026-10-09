@@ -1,0 +1,324 @@
+#!/usr/bin/env python3
+"""Friendly-name registry for the Chrome/Dia browsers connected to Claude.
+
+The claude-in-chrome MCP server identifies each browser by an opaque deviceId
+UUID and a display name the extension supplies ("Browser 1", "Browser 2"...).
+Neither tells an agent which profile it is looking at, so sessions guess wrong.
+
+This keeps a map of friendly aliases -> deviceId in ~/.claude/browsers.json so
+any Claude session can go from "use dia-work" to the right deviceId with one
+command:
+
+    browsers get dia-work        # -> <uuid>
+
+deviceIds are only visible while that browser is connected, so binding an alias
+is a live step: connect the browser, have Claude call list_connected_browsers,
+then `browsers add`.
+
+A deviceId is not guaranteed forever: re-authenticating the extension, or
+reinstalling it, can mint a new one. So never trust a stored id blindly — pipe
+the live listing through `browsers sync` to see which aliases are actually
+connected and which are stale.
+"""
+
+import argparse
+import datetime
+import json
+import os
+import re
+import sys
+
+REGISTRY = os.path.expanduser("~/.claude/browsers.json")
+
+
+def die(msg, code=1):
+    print(f"browsers: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def load():
+    if not os.path.exists(REGISTRY):
+        return {"default": None, "browsers": []}
+    with open(REGISTRY) as fh:
+        try:
+            data = json.load(fh)
+        except json.JSONDecodeError as exc:
+            die(f"{REGISTRY} is not valid JSON: {exc}")
+    data.setdefault("default", None)
+    data.setdefault("browsers", [])
+    return data
+
+
+def save(data):
+    os.makedirs(os.path.dirname(REGISTRY), exist_ok=True)
+    tmp = REGISTRY + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(data, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, REGISTRY)
+
+
+def find(data, alias):
+    """Resolve an alias, a deviceId, or how a human would actually say it.
+
+    Three passes, most precise first: exact match, then substring of an alias
+    or deviceId prefix, then token overlap so a whole phrase ("use my personal
+    browser") resolves. Anything matching two entries equally well is an error,
+    never a guess — picking the wrong profile is the failure this exists to
+    prevent.
+    """
+    entries = data["browsers"]
+    alias = alias.strip()
+    lowered = alias.lower()
+
+    for e in entries:
+        if e["alias"] == alias or e.get("deviceId") == alias:
+            return e
+
+    hits = [
+        e
+        for e in entries
+        if lowered in e["alias"].lower()
+        or (e.get("deviceId") or "").startswith(alias)
+    ]
+    if len(hits) == 1:
+        return hits[0]
+    if len(hits) > 1:
+        names = ", ".join(e["alias"] for e in hits)
+        die(f"'{alias}' is ambiguous — matches: {names}", 2)
+
+    words = set(re.findall(r"[a-z0-9]+", lowered))
+    scored = []
+    for e in entries:
+        tokens = set(re.split(r"[-_\s]+", e["alias"].lower()))
+        extra = {t.lower() for t in (e.get("app"), e.get("profile")) if t}
+        scored.append((len(words & (tokens | extra)), e))
+    best = max((s for s, _ in scored), default=0)
+    if best:
+        winners = [e for s, e in scored if s == best]
+        if len(winners) == 1:
+            return winners[0]
+        names = ", ".join(e["alias"] for e in winners)
+        die(f"'{alias}' is ambiguous — matches: {names}", 2)
+    return None
+
+
+def cmd_list(args):
+    data = load()
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return
+    if not data["browsers"]:
+        print("no browsers registered yet — see `browsers help-register`")
+        return
+    width = max(len(e["alias"]) for e in data["browsers"])
+    for e in data["browsers"]:
+        mark = "*" if e["alias"] == data["default"] else " "
+        dev = e.get("deviceId") or "(unbound — connect it and run `browsers add`)"
+        line = f"{mark} {e['alias']:<{width}}  {dev}"
+        notes = "; ".join(
+            filter(None, [e.get("app"), e.get("profile"), e.get("notes")])
+        )
+        if notes:
+            line += f"\n  {'':<{width}}  {notes}"
+        print(line)
+
+
+def cmd_get(args):
+    data = load()
+    args.alias = " ".join(args.alias) if isinstance(args.alias, list) else args.alias
+    entry = find(data, args.alias)
+    if entry is None:
+        known = ", ".join(e["alias"] for e in data["browsers"]) or "(none)"
+        die(f"unknown browser '{args.alias}'. Registered: {known}")
+    if not entry.get("deviceId"):
+        die(
+            f"'{entry['alias']}' is registered but not bound to a deviceId yet. "
+            "Connect that browser, then run `browsers add`."
+        )
+    print(entry["deviceId"])
+
+
+def cmd_add(args):
+    data = load()
+    entry = next((e for e in data["browsers"] if e["alias"] == args.alias), None)
+    if entry is None:
+        entry = {"alias": args.alias}
+        data["browsers"].append(entry)
+    if args.device_id:
+        entry["deviceId"] = args.device_id
+    for field in ("app", "profile", "notes"):
+        val = getattr(args, field)
+        if val is not None:
+            entry[field] = val
+    entry.setdefault("deviceId", None)
+    if args.device_id:
+        entry["boundAt"] = datetime.date.today().isoformat()
+    if data["default"] is None:
+        data["default"] = args.alias
+    save(data)
+    print(f"registered {args.alias} -> {entry.get('deviceId') or '(unbound)'}")
+
+
+def cmd_sync(args):
+    """Reconcile the registry against a live list_connected_browsers payload.
+
+    Feed it the JSON the MCP tool returned:  browsers sync < live.json
+    Nothing is rebound automatically — which alias a new deviceId belongs to is
+    a judgement call, so it reports and lets a human decide.
+    """
+    raw = sys.stdin.read().strip()
+    if not raw:
+        die("no JSON on stdin — pipe the list_connected_browsers output in")
+    try:
+        live = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        die(f"stdin is not valid JSON: {exc}")
+    if isinstance(live, dict):
+        live = live.get("browsers", [live])
+
+    data = load()
+    live_by_id = {b["deviceId"]: b for b in live if b.get("deviceId")}
+    known_ids = {e["deviceId"] for e in data["browsers"] if e.get("deviceId")}
+    today = datetime.date.today().isoformat()
+
+    connected, stale, unbound = [], [], []
+    for e in data["browsers"]:
+        if not e.get("deviceId"):
+            unbound.append(e)
+        elif e["deviceId"] in live_by_id:
+            e["lastSeen"] = today
+            e["extensionName"] = live_by_id[e["deviceId"]].get("name")
+            connected.append(e)
+        else:
+            stale.append(e)
+    unknown = [b for b in live if b.get("deviceId") not in known_ids]
+    save(data)
+
+    if connected:
+        print("connected:")
+        for e in connected:
+            shown = e.get("extensionName") or "?"
+            print(f"  {e['alias']}  ({shown}, {e['deviceId']})")
+    if stale:
+        print("registered but not connected right now:")
+        for e in stale:
+            seen = e.get("lastSeen") or e.get("boundAt") or "never"
+            print(f"  {e['alias']}  (last seen {seen}) — open it, or re-auth the extension")
+    if unbound:
+        print("declared but never bound:")
+        for e in unbound:
+            print(f"  {e['alias']} — connect it and run `browsers add`")
+    if unknown:
+        print("connected but UNKNOWN to the registry:")
+        for b in unknown:
+            print(f"  {b.get('name', '?')}  {b.get('deviceId')}")
+        print(
+            "  -> a new browser, or an existing one whose deviceId changed after "
+            "a re-login. Rebind with:\n"
+            "     browsers add <alias> --device-id <uuid>"
+        )
+    if not any([connected, stale, unbound, unknown]):
+        print("registry and live listing are both empty")
+
+
+def cmd_rm(args):
+    data = load()
+    before = len(data["browsers"])
+    data["browsers"] = [e for e in data["browsers"] if e["alias"] != args.alias]
+    if len(data["browsers"]) == before:
+        die(f"no browser named '{args.alias}'")
+    if data["default"] == args.alias:
+        data["default"] = data["browsers"][0]["alias"] if data["browsers"] else None
+    save(data)
+    print(f"removed {args.alias}")
+
+
+def cmd_default(args):
+    data = load()
+    if args.alias is None:
+        print(data["default"] or "(no default set)")
+        return
+    if find(data, args.alias) is None:
+        die(f"unknown browser '{args.alias}'")
+    data["default"] = find(data, args.alias)["alias"]
+    save(data)
+    print(f"default is now {data['default']}")
+
+
+def cmd_path(args):
+    print(REGISTRY)
+
+
+def cmd_help_register(args):
+    print(
+        """To bind a friendly name to a browser:
+
+  1. Open that browser (Chrome / Dia) with the Claude extension installed and
+     connected to your account.
+  2. In any Claude session, ask: "list connected browsers".
+     Claude calls the list_connected_browsers MCP tool, which returns the
+     deviceId for every browser that is connected *right now*.
+  3. Register it:
+
+       browsers add dia-work --device-id <uuid> --app Dia --profile work \\
+         --notes "work Google account; Jira/Confluence/Slack logged in"
+
+Only connected browsers appear in step 2, so bind them one at a time.
+Renaming the browser inside the Chrome extension itself (Claude can trigger
+this with the switch_browser tool) is worth doing too — it makes the raw MCP
+listing readable even when this registry is not consulted."""
+    )
+
+
+def main():
+    p = argparse.ArgumentParser(
+        prog="browsers",
+        description="Map friendly names to Claude-connected browser deviceIds.",
+    )
+    sub = p.add_subparsers(dest="cmd")
+
+    s = sub.add_parser("list", help="show every registered browser")
+    s.add_argument("--json", action="store_true", help="machine-readable output")
+    s.set_defaults(func=cmd_list)
+
+    s = sub.add_parser("get", help="print the deviceId for an alias")
+    s.add_argument("alias", nargs="+", help="alias, fragment, or a whole phrase")
+    s.set_defaults(func=cmd_get)
+
+    s = sub.add_parser("add", help="register or update an alias")
+    s.add_argument("alias")
+    s.add_argument("--device-id", help="deviceId from list_connected_browsers")
+    s.add_argument("--app", help="Chrome, Dia, Arc, ...")
+    s.add_argument("--profile", help="work, personal, ...")
+    s.add_argument("--notes", help="what this browser is logged into / used for")
+    s.set_defaults(func=cmd_add)
+
+    s = sub.add_parser("rm", help="forget an alias")
+    s.add_argument("alias")
+    s.set_defaults(func=cmd_rm)
+
+    s = sub.add_parser(
+        "sync",
+        help="reconcile registry vs live list_connected_browsers JSON on stdin",
+    )
+    s.set_defaults(func=cmd_sync)
+
+    s = sub.add_parser("default", help="show or set the default browser")
+    s.add_argument("alias", nargs="?")
+    s.set_defaults(func=cmd_default)
+
+    s = sub.add_parser("path", help="print the registry file path")
+    s.set_defaults(func=cmd_path)
+
+    s = sub.add_parser("help-register", help="how to bind a new browser")
+    s.set_defaults(func=cmd_help_register)
+
+    args = p.parse_args()
+    if not getattr(args, "func", None):
+        args = p.parse_args(["list"])
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

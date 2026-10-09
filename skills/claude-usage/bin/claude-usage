@@ -1,0 +1,53 @@
+#!/bin/bash
+# claude-usage — report Claude plan usage (5-hour session + 7-day window).
+# Source: ~/.claude/usage-cache.json, written by ~/.claude/statusline.sh on each
+# status-line refresh of any running interactive Claude Code session.
+#
+#   claude-usage          human-readable summary
+#   claude-usage --json   machine-readable JSON (for agents/scripts)
+#
+# Exit codes: 0 ok, 1 no data, 2 data is stale (> STALE_SECS old; still printed).
+CACHE="$HOME/.claude/usage-cache.json"
+STALE_SECS="${CLAUDE_USAGE_STALE_SECS:-300}"
+
+if [ ! -s "$CACHE" ]; then
+  echo "claude-usage: no data yet ($CACHE missing) — start an interactive Claude Code session" >&2
+  exit 1
+fi
+
+now=$(date +%s)
+out=$(jq --argjson now "$now" --argjson stale "$STALE_SECS" '
+  def win(w): if w == null then null else {
+      used_percentage: (w.used_percentage // null),
+      resets_at: (w.resets_at // null),
+      resets_in_seconds: (if w.resets_at then ([(w.resets_at|floor) - $now, 0] | max) else null end)
+    } end;
+  {
+    five_hour: win(.rate_limits.five_hour),
+    seven_day: win(.rate_limits.seven_day),
+    captured_at: .captured_at,
+    age_seconds: ($now - .captured_at),
+    stale: (($now - .captured_at) > $stale)
+  }' "$CACHE") || { echo "claude-usage: cannot parse $CACHE" >&2; exit 1; }
+
+stale=$(jq -r .stale <<<"$out")
+
+if [ "$1" = "--json" ]; then
+  printf '%s\n' "$out"
+else
+  fmt() { # label, window key
+    jq -r --arg k "$2" --arg l "$1" '
+      .[$k] as $w | if $w == null then "\($l): n/a" else
+        "\($l): \($w.used_percentage // "?" | if type=="number" then floor else . end)% used" +
+        (if $w.resets_in_seconds then
+           ", resets in \($w.resets_in_seconds/3600|floor)h\(($w.resets_in_seconds%3600)/60|floor|tostring|if length<2 then "0"+. else . end)m (\($w.resets_at|floor|strflocaltime("%a %H:%M")))"
+         else "" end) end' <<<"$out"
+  }
+  fmt "session (5h)" five_hour
+  fmt "weekly  (7d)" seven_day
+  age=$(jq -r .age_seconds <<<"$out")
+  [ "$stale" = "true" ] && echo "(stale: captured ${age}s ago — no active session refreshing it)"
+fi
+
+[ "$stale" = "true" ] && exit 2
+exit 0

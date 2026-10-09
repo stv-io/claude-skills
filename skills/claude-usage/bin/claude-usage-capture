@@ -1,0 +1,33 @@
+#!/bin/bash
+# claude-usage-capture — snapshot Claude Code's rate limits for `claude-usage`.
+#
+# Call it from your status-line command, passing the status-line JSON on stdin:
+#   input=$(cat)
+#   printf '%s' "$input" | claude-usage-capture
+#
+# Every running session writes here, and idle ones report stale/partial limits, so
+# merge per window instead of overwriting: newest window (latest resets_at) wins,
+# and within the same window the higher used_percentage wins (usage only rises).
+# Prints nothing; never fails the status line.
+USAGE_CACHE="$HOME/.claude/usage-cache.json"
+input=$(cat)
+mkdir -p "${USAGE_CACHE%/*}"
+[ -s "$USAGE_CACHE" ] || echo '{}' > "$USAGE_CACHE"
+printf '%s' "$input" | jq -c --arg now "$(date +%s)" --slurpfile old "$USAGE_CACHE" '
+  ($now|tonumber) as $t
+  | def live(w): if w and w.resets_at and (w.resets_at > $t) then w else null end;
+    def pick(a; b):
+      if a == null then b elif b == null then a
+      elif (a.resets_at|floor) != (b.resets_at|floor) then
+        (if a.resets_at > b.resets_at then a else b end)
+      elif (a.used_percentage // 0) >= (b.used_percentage // 0) then a else b end;
+    ($old[0] // {}) as $o
+  | select(.rate_limits)
+  | pick(live(.rate_limits.five_hour); live($o.rate_limits.five_hour)) as $f
+  | pick(live(.rate_limits.seven_day); live($o.rate_limits.seven_day)) as $s
+  | {captured_at: $t, session_id,
+     rate_limits: ({} + (if $f then {five_hour: $f} else {} end)
+                      + (if $s then {seven_day: $s} else {} end))}' \
+  > "$USAGE_CACHE.$$" 2>/dev/null && [ -s "$USAGE_CACHE.$$" ] \
+  && mv -f "$USAGE_CACHE.$$" "$USAGE_CACHE" || rm -f "$USAGE_CACHE.$$"
+exit 0
