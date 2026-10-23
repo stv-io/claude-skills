@@ -40,7 +40,7 @@ For each candidate give: size, the exact command, what breaks or must happen aft
 
 ## 2. Tracker
 
-Use the `tracker-page` skill in the run folder: one item per candidate, grouped by tier. Items move from `review`, to `decision` (waiting for the user), to `in-progress`, to `done` or `blocked`. Start `tracker.py serve` in the background and give the user the URL. Log every approval in the user's words: `tracker.py log "User selected …"`.
+Use the [`tracker-page`](../tracker-page) skill (same repo; install it alongside this one) in the run folder: one item per candidate, grouped by tier. Items move from `review`, to `decision` (waiting for the user), to `in-progress`, to `done` or `blocked`. Start `tracker.py serve` in the background and give the user the URL. Log every approval in the user's words: `tracker.py log "User selected …"`.
 
 ## 3. Run one step at a time
 
