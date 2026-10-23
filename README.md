@@ -1,6 +1,6 @@
 # claude-skills
 
-Five Claude Code skills I use every day: a live status page for long agent runs, and the chores around them. MIT licensed.
+Six Claude Code skills I use every day: a live status page for long agent runs, a house style for diagrams, and the chores around them. MIT licensed.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/tracker-page-dark.png">
@@ -15,6 +15,7 @@ Five Claude Code skills I use every day: a live status page for long agent runs,
 | [mac-disk-cleanup](skills/mac-disk-cleanup) | A full disk, cleaned one approved and measured step at a time. **Deletes files after you approve each step.** | **macOS only** | Python 3, [dust](https://github.com/bootandy/dust), tracker-page | writes `~/disk-cleanup-tracker/`; deletes what you approve |
 | [session-export](skills/session-export) | Share a Claude Code session as clean Markdown, not a terminal dump. Credential masking is best-effort. | any | Python 3 | reads your session transcripts; writes the file you name |
 | [claude-usage](skills/claude-usage) | Claude checks your 5-hour and weekly plan usage before starting something expensive. **Needs a one-line status-line hook.** | macOS, Linux | bash, jq 1.6+ | writes `~/.claude/usage-cache.json` |
+| [diagram-style](skills/diagram-style) | Diagrams Claude draws look like one consistent set instead of a different sketch each time: colour by role, one font, title as the conclusion. | any | Python 3; an [Excalidraw canvas](https://github.com/yctimlin/mcp_excalidraw) to draw on | writes the figures you ask for |
 | [browser-select](skills/browser-select) | With several browsers connected to Claude in Chrome, Claude asks which one instead of acting in the wrong account. | any | [Claude in Chrome](https://claude.com/chrome) in 2+ browsers, Python 3 | writes `~/.claude/browsers.json` |
 
 None of them use the network themselves.
@@ -58,6 +59,10 @@ Numbered prompts, Claude's original answers, one line per tool call, a contents 
 
 Your status line saves the plan's rate limits to a cache; the skill reads it, so Claude can tell you "5h: 44%, resets 15:10" and ask before launching a big fan-out when you're close to a limit. [Read more →](skills/claude-usage)
 
+### diagram-style
+
+One house style for architecture diagrams on an Excalidraw canvas: colour by role (open-color palette), Helvetica sizes, zone, card, chip and arrow rules, a title that states the conclusion, and a checklist before a figure is done. Every value is in `tokens.json`; `reference.py` draws a figure from them. The diagrams in this repo are drawn with it. [Read more →](skills/diagram-style)
+
 ### browser-select
 
 Gives each connected browser a name you choose (`work-chrome`, `personal-dia`), makes Claude ask which one to use when you haven't said, and keeps your answer for the session. [Read more →](skills/browser-select)
@@ -68,7 +73,7 @@ To edit the skills and have changes take effect immediately, clone the repo and 
 
 ```bash
 git clone https://github.com/stv-io/claude-skills.git ~/code/claude-skills
-for s in tracker-page browser-select claude-usage session-export mac-disk-cleanup; do
+for s in tracker-page browser-select claude-usage session-export mac-disk-cleanup diagram-style; do
   ln -s ~/code/claude-skills/skills/$s ~/.claude/skills/$s
 done
 # Optional: put the CLIs on your PATH
