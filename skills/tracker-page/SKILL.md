@@ -31,6 +31,8 @@ Statuses: `todo` · `in-progress` · `review` (ready for the human) · `decision
 
 Give the human a one-line restart command for after a reboot. The server is a foreground process, so it dies with the session that started it.
 
+**Markdown opens formatted.** Relative `.md` links (in notes, item links, top links and the log) are rendered as `/md?p=<path>`. `serve` starts one `mdserve` per folder the first time a file there is opened, redirects to it, and stops those servers when it exits. Because mdserve only serves a flat folder, each folder gets its own. Paths may climb out of the tracker folder (`../../docs/x.md`) but must stay inside the git repo that holds it. Without mdserve on `PATH`, or with `--no-mdserve`, the file is served as plain text. Link markdown by relative path, never as `file://` or a fixed mdserve port: the ports change on every start.
+
 ## Rules that make the page worth keeping open
 
 1. **Update after every state change, not at the end.** Each agent landing, push, approval or decision → `tracker.py item …` (status, note, rev) and a `tracker.py log "…"` line. The page reloads itself every 30 s.

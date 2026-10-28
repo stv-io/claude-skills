@@ -9,13 +9,20 @@ usage:
   tracker.py ask   <dir> "text" | --clear         decisions-for-the-human panel (amber)
   tracker.py log   <dir> "text"                   append a timestamped line to <dir>/LOG.md (append-only)
   tracker.py render <dir>                         rebuild <dir>/index.html (every other command also renders)
-  tracker.py serve <dir> [--port 8765]            serve <dir> on http://localhost:<port> (foreground)
+  tracker.py serve <dir> [--port 8765] [--no-mdserve]
+                                                  serve <dir> on http://localhost:<port> (foreground)
 
 Statuses: todo, in-progress, review, decision, blocked, done.
 Notes, links and log lines are linkified: http(s) URLs, and relative paths to files in <dir> (e.g. reports/x.md).
 The page reloads itself every 30 s, so it stays current while the task runs.
+
+Markdown links (relative *.md, including ../ paths elsewhere in the repo) open formatted: the page links
+them as /md?p=<path>, and `serve` starts one `mdserve` per folder on demand (mdserve only serves a flat
+folder) and redirects there. Targets must sit inside the git repo that holds <dir>. Without mdserve on
+PATH, or with --no-mdserve, the file is served as plain text.
 """
-import argparse, datetime, html, json, pathlib, re, sys, http.server, functools
+import argparse, datetime, html, json, pathlib, re, sys, http.server
+import atexit, shutil, signal, socket, subprocess, threading, time, urllib.parse
 
 STATUS = {  # icon, label, css class
     'done': ('✅', 'Done'), 'review': ('⬜', 'Ready for review'), 'in-progress': ('⏳', 'In progress'),
@@ -37,12 +44,19 @@ def save(d, s):
     s['updated'] = now(); path(d).write_text(json.dumps(s, indent=1, ensure_ascii=False)); render(d, s)
 
 
+def mdlink(u):
+    """Route relative markdown links through the server's /md endpoint (rendered by mdserve)."""
+    if re.match(r'^[a-z][\w+.-]*:|^[#/]', u): return u
+    p, _, frag = u.partition('#')
+    return f'/md?p={urllib.parse.quote(p)}' + (f'#{frag}' if frag else '') if p.endswith('.md') else u
+
+
 def linkify(text, d):
     t = html.escape(text)
     t = re.sub(r'(https?://[^\s<)]+)', r'<a href="\1">\1</a>', t)
     def rel(m):
         p = m.group(0)
-        return f'<a href="{p}">{p}</a>' if (pathlib.Path(d) / p).exists() else p
+        return f'<a href="{mdlink(p)}">{p}</a>' if (pathlib.Path(d) / html.unescape(p)).exists() else p
     return re.sub(r'(?<![\w/">])(?:[\w.-]+/)*[\w.-]+\.(?:md|html|json|csv|pdf|xlsx|txt|png|jpg)\b', rel, t)
 
 
@@ -56,13 +70,13 @@ def render(d, s=None):
             phase = i.get('phase'); grp = [x for x in items if x.get('phase') == phase]
             if phase: rows.append(f'<tr class="ph"><th colspan="4">{html.escape(phase)}<span>{sum(x["status"]=="done" for x in grp)}/{len(grp)}</span></th></tr>')
         icon, lab = STATUS.get(i['status'], ('?', i['status']))
-        links = ' · '.join(f'<a href="{html.escape(u)}">{html.escape(l)}</a>' for l, u in (i.get('links') or {}).items())
+        links = ' · '.join(f'<a href="{html.escape(mdlink(u))}">{html.escape(l)}</a>' for l, u in (i.get('links') or {}).items())
         note = (f'<div class="note">{linkify(i["note"], d)}</div>' if i.get('note') else '') + (f'<div class="note">{links}</div>' if links else '')
         rows.append(f'<tr class="{i["status"]}"><td class="st" title="{lab}">{icon}</td><td class="n">{html.escape(str(i["id"]))}</td>'
                     f'<td><b>{html.escape(i.get("title", ""))}</b>{note}</td><td class="lab">{lab}<div class="rev">{html.escape(i.get("rev", ""))}</div></td></tr>')
     panel = lambda key, cls, head: (f'<div class="blk {cls}"><b>{head}</b><ul>' + ''.join(f'<li>{linkify(x, d)}</li>' for x in s.get(key, [])) + '</ul></div>') if s.get(key) else ''
-    top = ' · '.join(f'<a href="{html.escape(u)}">{html.escape(l)}</a>' for l, u in (s.get('links') or {}).items())
-    if (pathlib.Path(d) / 'LOG.md').exists(): top = (top + ' · ' if top else '') + '<a href="LOG.md">LOG.md</a>'
+    top = ' · '.join(f'<a href="{html.escape(mdlink(u))}">{html.escape(l)}</a>' for l, u in (s.get('links') or {}).items())
+    if (pathlib.Path(d) / 'LOG.md').exists(): top = (top + ' · ' if top else '') + f'<a href="{mdlink("LOG.md")}">LOG.md</a>'
     summary = ' · '.join(f'{STATUS[k][0]} {v} {STATUS[k][1].lower()}' for k, v in counts.items() if v)
     page = f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="30">
 <title>{html.escape(s.get("title", "Tracker"))}</title><style>{THEME}
@@ -81,6 +95,52 @@ tr.in-progress td.lab{{color:var(--warn)}}tr.decision td.lab,tr.blocked td.lab{{
     print(f'index.html: {summary or "no items"}')
 
 
+class MdServers:
+    """One mdserve per folder, started on first use and stopped when the tracker server exits."""
+    def __init__(self):
+        self.exe, self.procs, self.lock = shutil.which('mdserve'), {}, threading.Lock()
+        atexit.register(self.stop)
+
+    def url(self, f):
+        if not self.exe: return None
+        with self.lock:
+            port, proc = self.procs.get(f.parent, (None, None))
+            if proc is None or proc.poll() is not None:
+                with socket.socket() as so: so.bind(('127.0.0.1', 0)); port = so.getsockname()[1]
+                proc = subprocess.Popen([self.exe, '-p', str(port), str(f.parent)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.procs[f.parent] = (port, proc)
+                for _ in range(50):  # up to 5 s for the listener
+                    try: socket.create_connection(('127.0.0.1', port), 0.1).close(); break
+                    except OSError: time.sleep(0.1)
+        return f'http://127.0.0.1:{port}/{urllib.parse.quote(f.name)}'
+
+    def stop(self):
+        for _, proc in self.procs.values(): proc.terminate()
+
+
+def handler(d, md):
+    base = pathlib.Path(d).resolve()
+    top = subprocess.run(['git', '-C', str(base), 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
+    root = pathlib.Path(top.stdout.strip()).resolve() if top.returncode == 0 else base
+
+    class H(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **k): super().__init__(*a, directory=d, **k)
+        def log_message(self, *a): pass
+        def do_GET(self):
+            u = urllib.parse.urlsplit(self.path)
+            if u.path != '/md': return super().do_GET()
+            rel = urllib.parse.parse_qs(u.query).get('p', [''])[0]
+            f = (base / rel).resolve()
+            if not (f.is_file() and f.suffix == '.md' and f.is_relative_to(root)): return self.send_error(404, f'not a markdown file under {root}: {rel}')
+            target = md.url(f) if md else None
+            if target:
+                self.send_response(302); self.send_header('Location', target); self.end_headers(); return
+            body = f.read_bytes()
+            self.send_response(200); self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
+    return H
+
+
 def main():
     ap = argparse.ArgumentParser(); sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('init'); p.add_argument('dir'); p.add_argument('--title', required=True); p.add_argument('--subtitle', default='')
@@ -93,6 +153,7 @@ def main():
     p = sub.add_parser('log'); p.add_argument('dir'); p.add_argument('text')
     p = sub.add_parser('render'); p.add_argument('dir')
     p = sub.add_parser('serve'); p.add_argument('dir'); p.add_argument('--port', type=int, default=8765)
+    p.add_argument('--no-mdserve', action='store_true', help='serve linked .md files as plain text')
     a = ap.parse_args(); d = a.dir
     if a.cmd == 'init':
         pathlib.Path(d).mkdir(parents=True, exist_ok=True)
@@ -121,9 +182,11 @@ def main():
         render(d)
     elif a.cmd == 'serve':
         render(d)
-        h = functools.partial(http.server.SimpleHTTPRequestHandler, directory=d)
-        print(f'serving {d} on http://localhost:{a.port}')
-        http.server.ThreadingHTTPServer(('127.0.0.1', a.port), h).serve_forever()
+        md = None if a.no_mdserve else MdServers()
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so atexit stops the mdserve children
+        print(f'serving {d} on http://localhost:{a.port}' + ('' if md and md.exe else ' (markdown as plain text: mdserve not used)'))
+        try: http.server.ThreadingHTTPServer(('127.0.0.1', a.port), handler(d, md)).serve_forever()
+        except KeyboardInterrupt: pass
 
 
 if __name__ == '__main__':
