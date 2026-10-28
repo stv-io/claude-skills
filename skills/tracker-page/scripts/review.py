@@ -13,16 +13,73 @@ cards.json:
          "before": "old text", "after": "new text", "links": {"evidence": "url-or-path"}}]}]}
 
 approvals.json:  {"approved": ["Acme / DES-001", ...], "held": ["Acme / DES-002"], "notes": {"Acme / DES-002": "..."}}
-  The reference of a card is "<group name> / <card id>". Approved cards show a ✅ badge; the board counts
+  The reference of a card is "<group name> / <card id>". Approved cards show an Approved label; the board counts
   approved / held / pending per group from this file, so the page never disagrees with what was approved.
 
 Each card shows BEFORE (left, removed words red) and AFTER (right, added words green), full text on both sides;
-an inline diff is behind a toggle. Approve / Hold / note are saved in the browser; "Summary for Claude" copies
-lines "<ref>: approve|hold|unreviewed — note" for the human to paste back into the session.
+an inline diff is behind a toggle. Unchanged cards are folded away at the bottom, with "Approve all unchanged".
+Approve / Hold / Not reviewed and the note are saved in the browser; keys: j/k move, a approve, h hold,
+u not reviewed, n note. "Copy summary for Claude" copies lines "<ref>: approve|hold|unreviewed — note" for the
+human to paste back into the session.
 """
 import difflib, html, json, pathlib, re, sys
 
-THEME = (pathlib.Path(__file__).resolve().parent / 'tracker.py').read_text().split('THEME = """', 1)[1].split('"""', 1)[0]
+THEME = (pathlib.Path(__file__).resolve().parent / 'theme.css').read_text()
+CSS = '''
+main{max-width:1500px}
+.bar{position:sticky;top:0;z-index:1;background:var(--bg);border:1px solid var(--line);border-radius:6px;margin:16px 0;padding:8px 16px;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.bar .keys{margin-left:auto}
+.card{scroll-margin-top:72px}.card.cur{box-shadow:0 0 0 2px var(--acc)}
+.card.approve{border-color:color-mix(in srgb,var(--ok) 55%,var(--line))}.card.hold{border-color:color-mix(in srgb,var(--bad) 55%,var(--line))}
+.seg{display:inline-flex;margin-left:auto}.seg label{font-size:12px;font-weight:500;padding:3px 12px;border:1px solid var(--line);background:var(--sub);cursor:pointer;white-space:nowrap}
+.seg label:first-child{border-radius:6px 0 0 6px}.seg label:last-child{border-radius:0 6px 6px 0}.seg label+label{border-left:0}
+.seg input{position:absolute;opacity:0;pointer-events:none}.seg label:has(input:focus-visible){outline:2px solid var(--acc)}
+.seg label:has(input[value=approve]:checked){background:var(--ok-bg);color:var(--ok)}.seg label:has(input[value=hold]:checked){background:var(--bad-bg);color:var(--bad)}
+.seg label:has(input[value=unreviewed]:checked){color:var(--fg)}
+.l-approve{color:var(--ok)}.l-hold{color:var(--bad)}
+.diff{display:grid;grid-template-columns:1fr 1fr}.diff>div{padding:10px 16px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px}.diff>div+div{border-left:1px solid var(--line)}
+.diff h3,.inl h3{margin:0 0 4px;font-size:12px;font-weight:600;color:var(--mute)}
+.inl{display:none;padding:10px 16px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px}body.inline .inl{display:block}body.inline .diff{display:none}
+@media (max-width:800px){.diff{grid-template-columns:1fr}.diff>div+div{border-left:0;border-top:1px solid var(--line)}}
+.ctx{white-space:pre-wrap;color:var(--mute);font-size:13px;max-height:10em;overflow:auto;margin:6px 0 0}
+.box-f details{flex-basis:100%}.box-f summary{cursor:pointer;color:var(--mute);font-size:12px}
+.box-f textarea{flex:1;min-width:200px}
+details.unch>summary{cursor:pointer;margin:16px 0 8px}details.unch>summary .btn{margin-left:8px}
+#sum{white-space:pre-wrap;font:12px ui-monospace,monospace;background:var(--sub);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px 16px;border-top:1px solid var(--line)}thead th{border-top:0;font-size:12px;color:var(--mute);font-weight:600}
+td.num,th.num{text-align:right;width:80px}
+'''
+JS = r'''
+const $=(q,e=document)=>e.querySelector(q),$$=(q,e=document)=>[...e.querySelectorAll(q)];
+const K=document.body.dataset.key;let st={};try{st=JSON.parse(localStorage.getItem(K)||'{}')}catch(e){}
+const save=()=>{try{localStorage.setItem(K,JSON.stringify(st))}catch(e){}};
+const cards=$$('.card'),val=c=>(st[c.id]||{}).v||c.dataset.state||'unreviewed';
+function paint(c){const v=val(c);c.classList.toggle('approve',v==='approve');c.classList.toggle('hold',v==='hold');
+  const r=$(`input[value="${v}"]`,c);if(r)r.checked=true}
+function progress(){const n=cards.filter(c=>val(c)!=='unreviewed').length;$('#done').textContent=`${n} of ${cards.length} reviewed`;
+  $('#bar i').style.width=(cards.length?100*n/cards.length:0)+'%'}
+function set(c,v){st[c.id]=st[c.id]||{};st[c.id].v=v;save();paint(c);progress()}
+cards.forEach(c=>{const s=st[c.id]||{},t=$('textarea',c);if(s.n)t.value=s.n;paint(c);
+  $$('input[type=radio]',c).forEach(r=>r.onchange=()=>set(c,r.value));
+  t.oninput=()=>{st[c.id]=st[c.id]||{};st[c.id].n=t.value;save()}});
+progress();
+let cur=-1;function go(i){if(!cards.length)return;cur=Math.max(0,Math.min(cards.length-1,i));
+  cards.forEach(c=>c.classList.remove('cur'));const c=cards[cur];const u=c.closest('details');if(u)u.open=true;
+  c.classList.add('cur');c.scrollIntoView({block:'start',behavior:'smooth'})}
+$('#next').onclick=()=>{const i=cards.findIndex((c,k)=>k>cur&&val(c)==='unreviewed'),j=i<0?cards.findIndex(c=>val(c)==='unreviewed'):i;if(j>=0)go(j)};
+function toggleView(){const i=document.body.classList.toggle('inline');$('#view').textContent=i?'Side by side':'Inline diff';try{localStorage.setItem(K+'-view',i?'inline':'sbs')}catch(e){}}
+$('#view').onclick=toggleView;try{if(localStorage.getItem(K+'-view')==='inline')toggleView()}catch(e){}
+const all=$('#allunch');if(all)all.onclick=e=>{e.preventDefault();$$('.unch .card').forEach(c=>set(c,'approve'))};
+$('#copy').onclick=async()=>{const L=cards.map(c=>{const s=st[c.id]||{};return c.dataset.ref+': '+val(c)+(s.n?' — '+s.n.replace(/\s*\n\s*/g,' '):'')});
+  const p=$('#sum'),txt=L.join('\n');p.textContent=txt;p.hidden=false;
+  try{await navigator.clipboard.writeText(txt);$('#copy').textContent='Copied ✓';setTimeout(()=>$('#copy').textContent='Copy summary for Claude',2000)}
+  catch(e){$('#copy').textContent='Select the text below and copy it'}};
+document.addEventListener('keydown',e=>{if(e.target.closest('textarea,input[type=text]')||e.metaKey||e.ctrlKey||e.altKey)return;
+  const c=cards[cur];
+  if(e.key==='j')go(cur+1);else if(e.key==='k')go(cur-1);
+  else if(c&&e.key==='a')set(c,'approve');else if(c&&e.key==='h')set(c,'hold');else if(c&&e.key==='u')set(c,'unreviewed');
+  else if(c&&e.key==='n'){e.preventDefault();$('textarea',c).focus()}else return;});
+'''
 
 
 def toks(s): return re.findall(r'\S+|\s+', s or '')
@@ -41,69 +98,65 @@ def sbs(a, b):
 def slug(s): return re.sub(r'[^a-z0-9]+', '-', s.lower()).strip('-') or 'group'
 
 
-PAGE = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{title}</title><style>{theme}
-main{{max-width:1500px}}.card{{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:14px 0}}
-.card h2{{font-size:16px;margin:0 0 4px}}.badge{{font-size:12px;font-weight:500;margin-left:8px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--mute)}}
-.badge.ok{{color:var(--ok);border-color:var(--ok)}}.badge.hold{{color:var(--q);border-color:var(--q)}}.card.approve{{border-color:var(--ok)}}.card.hold{{border-color:var(--q)}}
-.meta{{font-size:12px;color:var(--mute)}}.ctx{{font-size:13px;color:var(--mute);white-space:pre-wrap;max-height:8em;overflow:auto;border-left:3px solid var(--line);padding-left:8px;margin:6px 0}}
-.sbs{{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}}.sbs>div{{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--bg);white-space:pre-wrap;font-size:13.5px;overflow-wrap:anywhere}}
-.sbs h3{{margin:0 0 6px;font-size:12px;color:var(--mute);font-weight:600;text-transform:uppercase;letter-spacing:.04em}}@media (max-width:800px){{.sbs{{grid-template-columns:1fr}}}}
-.inl{{white-space:pre-wrap;font-size:14px;overflow-wrap:anywhere;display:none}}body.inline .inl{{display:block}}body.inline .sbs{{display:none}}
-ins{{background:var(--ins);text-decoration:none}}del{{background:var(--del)}}button{{font:inherit;padding:4px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}}
-.ctl{{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}}textarea{{width:100%;font:inherit;margin-top:6px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px}}
-details summary{{cursor:pointer;color:var(--mute);font-size:13px}}#sum{{white-space:pre-wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}}</style></head>
-<body><main><h1>{title}</h1><p class="sub">Before on the left, after on the right. Approve or Hold each card, add a note, then copy <b>Summary for Claude</b> into the session. <a href="index.html">All groups</a></p>
-<p><button onclick="summary()">Summary for Claude</button> <button onclick="toggleView()" id="vbtn">Switch to inline diff</button></p><pre id="sum" hidden></pre>
-{cards}</main><script>
-const K='{key}';let st={{}};try{{st=JSON.parse(localStorage.getItem(K)||'{{}}')}}catch(e){{}}
-function save(){{try{{localStorage.setItem(K,JSON.stringify(st))}}catch(e){{}}}}
-function set(id,v){{st[id]=st[id]||{{}};st[id].v=v;document.getElementById(id).className='card '+v;save()}}
-function note(id,t){{st[id]=st[id]||{{}};st[id].n=t;save()}}
-for(const [id,s] of Object.entries(st)){{const e=document.getElementById(id);if(e){{if(s.v)e.className='card '+s.v;if(s.n)e.querySelector('textarea').value=s.n}}}}
-function toggleView(){{const i=document.body.classList.toggle('inline');document.getElementById('vbtn').textContent=i?'Switch to side by side':'Switch to inline diff';try{{localStorage.setItem(K+'-view',i?'inline':'sbs')}}catch(e){{}}}}
-try{{if(localStorage.getItem(K+'-view')==='inline')toggleView()}}catch(e){{}}
-function summary(){{const L=[];document.querySelectorAll('.card').forEach(c=>{{const s=st[c.id]||{{}};L.push(c.dataset.ref+': '+(s.v||c.dataset.state||'unreviewed')+(s.n?' — '+s.n:''))}});const p=document.getElementById('sum');p.textContent=L.join('\\n');p.hidden=false;navigator.clipboard&&navigator.clipboard.writeText(p.textContent)}}
-</script></body></html>'''
+def page(title, body, key=''):
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            f'<title>{title}</title><style>{THEME}{CSS}</style></head><body data-key="{key}"><main>{body}</main>'
+            + (f'<script>{JS}</script>' if key else '') + '</body></html>')
+
+
+def card(g, k, state):
+    ref = f'{g} / {k["id"]}'; cid = slug(ref)
+    L, R, I, add, rem = sbs(k.get('before', ''), k.get('after', ''))
+    lab = {'approve': ('approve', 'Approved'), 'hold': ('hold', 'Held')}.get(state)  # recorded in approvals.json
+    badge = f'<span class="label l-{lab[0]}" title="Recorded in approvals.json">{lab[1]}</span>' if lab else ''
+    links = ' · '.join(f'<a href="{html.escape(u)}">{html.escape(l)}</a>' for l, u in (k.get('links') or {}).items())
+    meta = f'{len(k.get("before", "").split())} → {len(k.get("after", "").split())} words · +{add} −{rem}' + (f' · {links}' if links else '')
+    radios = ''.join(f'<label><input type="radio" name="{cid}" value="{v}">{t}</label>' for v, t in (('approve', 'Approve'), ('hold', 'Hold'), ('unreviewed', 'Not reviewed')))
+    ctx = f'<details><summary>Requirement</summary><div class="ctx">{html.escape(k["context"])}</div></details>' if k.get('context') else ''
+    return (f'<article class="box card" id="{cid}" data-ref="{html.escape(ref)}" data-state="{state}">'
+            f'<div class="box-h">{html.escape(k.get("heading", k["id"]))} {badge}<span class="mute">{meta}</span>'
+            f'<span class="seg" role="radiogroup" aria-label="Decision">{radios}</span></div>'
+            f'<div class="diff"><div><h3>Before</h3>{L or "<i>(empty)</i>"}</div><div><h3>After</h3>{R or "<i>(empty)</i>"}</div></div><div class="inl"><h3>Changes</h3>{I}</div>'
+            f'<div class="box-f">{ctx}<textarea rows="1" placeholder="Note (optional)" aria-label="Note on {html.escape(ref)}"></textarea></div></article>')
 
 
 def build(cards_path, out, approvals_path=None):
     c = json.loads(pathlib.Path(cards_path).read_text()); out = pathlib.Path(out); out.mkdir(parents=True, exist_ok=True)
     ap = json.loads(pathlib.Path(approvals_path).read_text()) if approvals_path and pathlib.Path(approvals_path).exists() else {}
     ok, held = set(ap.get('approved', [])), set(ap.get('held', []))
-    board = []
+    title = c.get('title', 'Review'); board = []
     for g in c['groups']:
-        cards, n_ok, n_hold, changed = [], 0, 0, 0
+        changed, same, n_ok, n_hold = [], [], 0, 0
         for k in g['cards']:
-            ref = f'{g["name"]} / {k["id"]}'; cid = slug(ref)
-            L, R, I, add, rem = sbs(k.get('before', ''), k.get('after', ''))
-            changed += k.get('before', '') != k.get('after', '')
+            ref = f'{g["name"]} / {k["id"]}'
             state = 'approve' if ref in ok else 'hold' if ref in held else ''
             n_ok += state == 'approve'; n_hold += state == 'hold'
-            badge = {'approve': '<span class="badge ok">✅ Approved</span>', 'hold': '<span class="badge hold">⏸ Held</span>'}.get(state, '<span class="badge">· Pending</span>')
-            links = ' · '.join(f'<a href="{html.escape(u)}">{html.escape(l)}</a>' for l, u in (k.get('links') or {}).items())
-            ctx = f'<details><summary>Context</summary><div class="ctx">{html.escape(k["context"])}</div></details>' if k.get('context') else ''
-            cards.append(f'<div class="card {state}" id="{cid}" data-ref="{html.escape(ref)}" data-state="{state}"><h2>{html.escape(k.get("heading", k["id"]))} {badge}</h2>'
-                         f'<div class="meta">{len(k.get("before","").split())} → {len(k.get("after","").split())} words · +{add} / −{rem}{" · unchanged" if not add and not rem else ""}{" · " + links if links else ""}</div>{ctx}'
-                         f'<div class="sbs"><div><h3>Before</h3>{L or "<i>(empty)</i>"}</div><div><h3>After</h3>{R}</div></div><div class="inl">{I}</div>'
-                         f'<div class="ctl"><button onclick="set(\'{cid}\',\'approve\')">Approve</button><button onclick="set(\'{cid}\',\'hold\')">Hold</button></div>'
-                         f'<textarea rows="2" placeholder="Note" oninput="note(\'{cid}\',this.value)"></textarea></div>')
+            (changed if k.get('before', '') != k.get('after', '') else same).append(card(g['name'], k, state))
+        unch = (f'<details class="unch"><summary>{len(same)} unchanged card{"s" if len(same) != 1 else ""} '
+                f'<button class="btn" type="button" id="allunch">Approve all unchanged</button></summary>{"".join(same)}</details>') if same else ''
+        bar = (f'<div class="bar"><b>{html.escape(g["name"])}</b><span id="done" class="mute"></span><span class="mini" id="bar"><i></i></span>'
+               f'<button class="btn" type="button" id="next">Next unreviewed</button><button class="btn" type="button" id="view">Inline diff</button>'
+               f'<button class="btn primary" type="button" id="copy">Copy summary for Claude</button>'
+               f'<span class="keys small mute"><kbd>j</kbd> <kbd>k</kbd> move · <kbd>a</kbd> approve · <kbd>h</kbd> hold · <kbd>u</kbd> not reviewed · <kbd>n</kbd> note</span></div>')
+        body = (f'<header class="head"><h1>{html.escape(title)}: {html.escape(g["name"])}</h1><nav><a href="index.html">All groups</a></nav>'
+                f'<p class="mute">Before on the left, after on the right. Approve or Hold each card, add a note, then copy the summary into the session.</p></header>'
+                f'{bar}<pre id="sum" hidden></pre>{"".join(changed)}{unch}')
         s = slug(g['name'])
-        (out / f'{s}.html').write_text(PAGE.format(title=html.escape(f'{c.get("title","Review")}: {g["name"]}'), theme=THEME, cards=''.join(cards), key=f'rv-{slug(c.get("title","review"))}-{s}'))
-        board.append((s, g['name'], len(g['cards']), changed, n_ok, n_hold))
+        (out / f'{s}.html').write_text(page(html.escape(f'{title}: {g["name"]}'), body, f'rv-{slug(title)}-{s}'))
+        board.append((s, g['name'], len(g['cards']), len(changed), n_ok, n_hold))
     rows, tot = [], [0, 0, 0]
     for s, name, t, ch, a, h in board:
         tot[0] += t; tot[1] += a; tot[2] += h; pct = round(100 * a / t) if t else 0
-        lab, cls = ('✅ Done', 'done') if a == t else ('⏸ Has holds', 'hold') if h else ('⏳ In review', 'prog') if a else ('· Not started', 'todo')
-        rows.append(f'<tr class="{cls}"><td><a href="{s}.html"><b>{html.escape(name)}</b></a><div class="m">{ch} of {t} changed</div></td><td class="num">{a}</td><td class="num">{h}</td>'
-                    f'<td class="num">{t-a-h}</td><td><div class="bar"><i style="width:{pct}%"></i></div><div class="m">{pct}%</div></td><td class="st">{lab}</td></tr>')
+        lab, cls = ('Done', 'l-done') if a == t else ('Has holds', 'l-blocked') if h else ('In review', 'l-in-progress') if a else ('Not started', 'l-todo')
+        rows.append(f'<tr><td><a href="{s}.html"><b>{html.escape(name)}</b></a><div class="small mute">{ch} of {t} changed</div></td><td class="num">{a}</td><td class="num">{h}</td>'
+                    f'<td class="num">{t - a - h}</td><td><span class="mini" role="img" aria-label="{pct}% approved"><i style="width:{pct}%"></i></span> <span class="small mute">{pct}%</span></td>'
+                    f'<td><span class="label {cls}">{lab}</span></td></tr>')
     tp = round(100 * tot[1] / tot[0]) if tot[0] else 0
-    (out / 'index.html').write_text(f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(c.get("title","Review"))} Status</title>
-<style>{THEME}.wrap{{overflow-x:auto}}table{{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}}th,td{{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left}}
-th{{font-size:12px;color:var(--mute)}}td.num{{text-align:right;width:70px}}.m{{font-size:12px;color:var(--mute)}}.bar{{height:8px;background:var(--line);border-radius:4px;overflow:hidden;min-width:120px}}.bar i{{display:block;height:100%;background:var(--ok)}}
-tr.done td.st{{color:var(--ok)}}tr.hold td.st{{color:var(--q)}}tr.prog td.st{{color:var(--warn)}}tr.todo td.st{{color:var(--mute)}}</style></head>
-<body><main><h1>{html.escape(c.get("title","Review"))}: status</h1><p class="sub">{tot[1]} of {tot[0]} approved ({tp}%) · {tot[2]} held · source: approvals file</p>
-<div class="wrap"><table><thead><tr><th>Group</th><th class="num">Approved</th><th class="num">Held</th><th class="num">Pending</th><th>Progress</th><th>Status</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div></main></body></html>''')
+    body = (f'<header class="head"><h1>{html.escape(title)}: status</h1>'
+            f'<p class="mute">{tot[1]} of {tot[0]} approved ({tp}%) · {tot[2]} held · counts come from the approvals file, not the browser</p></header>'
+            f'<div class="box" style="margin-top:16px"><table><thead><tr><th>Group</th><th class="num">Approved</th><th class="num">Held</th><th class="num">Pending</th><th>Progress</th><th>Status</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>')
+    (out / 'index.html').write_text(page(f'{html.escape(title)} status', body))
     print(f'{out}/index.html: {tot[1]}/{tot[0]} approved, {tot[2]} held')
 
 
