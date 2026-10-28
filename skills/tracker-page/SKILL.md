@@ -33,6 +33,10 @@ Give the human a one-line restart command for after a reboot. The server is a fo
 
 **Markdown opens formatted.** Relative `.md` links (in notes, item links, top links and the log) are rendered as `/md?p=<path>`. `serve` starts one `mdserve` per folder the first time a file there is opened, redirects to it, and stops those servers when it exits. Because mdserve only serves a flat folder, each folder gets its own. Paths may climb out of the tracker folder (`../../docs/x.md`) but must stay inside the git repo that holds it. Without mdserve on `PATH`, or with `--no-mdserve`, the file is served as plain text. Link markdown by relative path, never as `file://` or a fixed mdserve port: the ports change on every start.
 
+**Optional tools.** Both are optional; the scripts themselves need only Python 3.
+- `mdserve` (`brew install mdserve`): formatted markdown, as above.
+- `crit` (`brew install crit`): when the human wants to comment on the page itself while you wait, run `crit http://localhost:<port>` in the background and act on the comments when it returns. If `crit` isn't installed, ask the human to paste their comments instead.
+
 ## Rules that make the page worth keeping open
 
 1. **Update after every state change, not at the end.** Each agent landing, push, approval or decision → `tracker.py item …` (status, note, rev) and a `tracker.py log "…"` line. The page reloads itself every 30 s.
