@@ -1,0 +1,27 @@
+name: tracker-page
+
+on:
+  pull_request:
+    paths: ['skills/tracker-page/**', '.github/workflows/tracker-page.yml']
+  push:
+    branches: [main]
+    paths: ['skills/tracker-page/**', '.github/workflows/tracker-page.yml']
+
+jobs:
+  # The scripts promise to run on macOS's system Python 3.9; browser tests skip here.
+  python-3-9:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: skills/tracker-page/tests } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run --no-project --python 3.9 --with pytest pytest -q
+
+  browser:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: skills/tracker-page/tests } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run --no-project --with playwright playwright install --with-deps chromium
+      - run: uv run --no-project --with pytest --with playwright pytest -q
