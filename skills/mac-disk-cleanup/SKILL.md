@@ -11,7 +11,7 @@ A disk cleanup goes wrong in three ways: deleting something the user wanted, kil
 - **run** one step at a time, measuring free space before and after;
 - **log** the step.
 
-The hotspot list, with clean commands and gotchas, is in `references/catalog.md`. Read it before you propose cleanups. Scripts: `S=~/.claude/skills/mac-disk-cleanup/scripts`.
+The hotspot list, with clean commands and gotchas, is in `references/catalog.md`. Read it before you propose cleanups. Scripts: `S=<this skill's folder>/scripts` (usually `~/.claude/skills/mac-disk-cleanup/scripts`).
 
 ## 0. Before touching anything
 
@@ -55,7 +55,7 @@ Use the [`tracker-page`](../tracker-page) skill (same repo; install it alongside
 
 When a step shows little or no free-space gain, check local snapshots: `tmutil listlocalsnapshots /`.
 - If a snapshot was taken before the deletions, it holds the deleted blocks. Give the user `! sudo tmutil deletelocalsnapshots <date>` (or tell them it clears itself within about a day).
-- Re-measure afterwards with `df -k` (or `rtk proxy df -h`; filtered `df` output can drop the Avail column) and log the real number.
+- Re-measure afterwards with `df -k` and log the real number. If a shell wrapper or hook filters `df` output, check the Avail column survived.
 
 ## 5. Close the run
 

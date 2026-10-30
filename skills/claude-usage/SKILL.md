@@ -5,7 +5,7 @@ description: Check the user's Claude plan usage — the 5-hour session limit and
 
 # Claude plan usage
 
-Run the CLI; don't estimate usage from memory or from this conversation's length.
+Run the CLI; don't estimate usage from memory or from this conversation's length. It is `bin/claude-usage` in this skill's folder; if `claude-usage` isn't on your PATH, run it by that full path.
 
 ```bash
 claude-usage          # human-readable

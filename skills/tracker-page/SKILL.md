@@ -14,7 +14,7 @@ Two tools, usable separately or together:
 | `scripts/tracker.py` | `<dir>/status.json` | `<dir>/index.html`, `<dir>/LOG.md`, `<dir>/feedback.json` | the task itself: items, phases, statuses, blockers, decisions, links, log, the human's comments |
 | `scripts/review.py` | `cards.json` (+ `approvals.json`) | one page per group + a status board | reviewing many pieces of content (cells, sections, files) before they are published |
 
-Scripts live in this skill's folder: `S=~/.claude/skills/tracker-page/scripts`. Python 3 stdlib only.
+Scripts live in this skill's folder: `S=<this skill's folder>/scripts` (usually `~/.claude/skills/tracker-page/scripts`). Python 3 stdlib only.
 
 ## Setting up a tracker
 
@@ -84,7 +84,7 @@ Use when the human must review many pieces of content before they go anywhere: w
 Tests live in `tests/` and need nothing installed beyond `uv`:
 
 ```bash
-cd ~/.claude/skills/tracker-page/tests
+cd <this skill's folder>/tests
 uv run --with pytest --with playwright playwright install chromium   # once
 uv run --with pytest --with playwright pytest -q
 ```

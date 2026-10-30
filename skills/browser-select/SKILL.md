@@ -9,7 +9,7 @@ The user runs several browsers against the same Claude account — different
 profiles with different logins and permission boundaries. The MCP layer only
 exposes an opaque `deviceId` and a generic extension name ("Browser 1"), so
 sessions pick the wrong one. `~/.claude/browsers.json` maps friendly aliases to
-deviceIds; the `browsers` CLI (`bin/browsers` in this skill, installed on your PATH) reads and maintains it.
+deviceIds; the `browsers` CLI (`bin/browsers` in this skill's folder; if `browsers` isn't on your PATH, run it by that full path) reads and maintains it.
 
 **Using the wrong browser is a real failure, not a cosmetic one** — the wrong
 profile means the wrong Google account, wrong Jira tenant, and work data

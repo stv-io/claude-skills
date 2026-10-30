@@ -31,7 +31,7 @@ size() { # dust one level deep, biggest last; -x stays on this filesystem
   echo
   echo "## Cleanups possibly already running"
   pgrep -fl 'uv cache|nix-collect-garbage|nix-store --gc|brew cleanup|npm cache|tmutil delete' | grep -v pgrep || echo "(none)"
-  ls -d "$HOME"/disk-cleanup-tracker/runs/* 2>/dev/null | tail -3
+  find "$HOME/disk-cleanup-tracker/runs" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | tail -3
   echo
   echo "## Home"
   size "$HOME" 20
