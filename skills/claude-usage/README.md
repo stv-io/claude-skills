@@ -57,6 +57,34 @@ Then `chmod +x ~/.claude/statusline.sh` and add this to `~/.claude/settings.json
 
 It should print `session (5h): …% used` and `weekly (7d): …% used`. More on status lines: [Claude Code docs](https://code.claude.com/docs/en/statusline).
 
+## What it looks like
+
+```text
+$ claude-usage
+session (5h): 31% used, resets in 1h06m (Fri 15:02)
+weekly  (7d): 59% used, resets in 44h06m (Sun 10:02)
+```
+
+When no interactive session has refreshed the cache for over 5 minutes, it says so and exits 2:
+
+```text
+session (5h): 31% used, resets in 1h06m (Fri 15:02)
+weekly  (7d): 59% used, resets in 44h06m (Sun 10:02)
+(stale: captured 900s ago — no active session refreshing it)
+```
+
+Claude uses `claude-usage --json` (percentages, reset times, `stale`) to decide whether to ask before a big run.
+
+**Optional: the limits in your status line too.** The same input carries them, so your status line can show them all the time:
+
+```bash
+printf '%s' "$input" | jq -r '"\(.model.display_name) · limits 5h:\(.rate_limits.five_hour.used_percentage // "?")% 7d:\(.rate_limits.seven_day.used_percentage // "?")%"'
+```
+
+```text
+Opus · limits 5h:31% 7d:59%
+```
+
 ## Use it
 
 *"How much usage do I have left?"*, *"when does my limit reset?"*. Claude also checks before launching anything large, and asks first if the 5-hour window is past 80% or the week past 90%.

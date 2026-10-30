@@ -14,7 +14,15 @@ flowchart LR
 
 `/export` gives you the raw terminal: box-drawing tables, wrapped diffs, every tool result. This gives you numbered prompts, Claude's original Markdown, tool calls collapsed into one line each, a contents list and a list of outcomes. You can export a range of prompts and set a title.
 
-An excerpt from a real export (working directory shortened):
+```text
+$ session-export --prompts
+  1. Read .env.example in this folder and tell me in two sentences what it configures and whether it is…
+$ session-export --title "Is this .env safe to commit?" -o ~/env-review.md
+session-export: 1 prompts from 9899966f written to ~/env-review.md
+session-export: masked 1 secret-assignment — check the «redacted» spots before sharing
+```
+
+An excerpt from that export (working directory shortened):
 
 ```markdown
 ## 1. Read .env.example in this folder and tell me in two sentences what it…

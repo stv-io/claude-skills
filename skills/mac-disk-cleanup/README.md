@@ -36,6 +36,30 @@ npx skills add stv-io/claude-skills --skill mac-disk-cleanup --skill tracker-pag
 
 *"My disk is full"*, *"free up space"*, *"what's using my disk?"*. If a command fails with "No space left on device", Claude offers this skill. It doesn't start a cleanup on its own.
 
+## What it looks like
+
+Each agreed step goes through `run_step.py`, which measures free space before and after and keeps a report. A demo step deleting a 300 MiB cache:
+
+```text
+$ python3 $S/run_step.py ~/disk-cleanup-tracker/runs/2026-10-30 A1 --delete ~/.cache/demo-tool
+{"item": "A1", "command": "delete ['~/.cache/demo-tool']", "exit_code": 0,
+ "before_free": 260129288192, "after_free": 260442808320, "change": 313520128,
+ "report": "~/disk-cleanup-tracker/runs/2026-10-30/reports/20261030-135615-A1.txt"}
+```
+
+The tracker item becomes:
+
+```text
+done | Exit 0; free space +0.29 GiB, now 242.56 GiB. A flat result usually means a local snapshot still holds the blocks.
+```
+
+And a target it won't touch:
+
+```text
+$ python3 $S/run_step.py ~/disk-cleanup-tracker/runs/2026-10-30 A2 --delete ~/Library
+refusing top-level folder: ~/Library
+```
+
 ## What it touches
 
 - **Reads** disk usage across your home folder, `/Applications`, `/opt/homebrew` and `/private/var` (sizes only).
