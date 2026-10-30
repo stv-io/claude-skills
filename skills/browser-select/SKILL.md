@@ -19,7 +19,6 @@ touched from a personal session.
 
 This applies once the registry holds more than one browser. With none or one registered (`browsers list`), carry on as normal and offer to register them if the user mentions several profiles.
 
-
 **Unless the user has named a profile, ask which one to use. Always. Never
 choose on their behalf.**
 

@@ -14,7 +14,7 @@ Two tools, usable separately or together:
 | `scripts/tracker.py` | `<dir>/status.json` | `<dir>/index.html`, `<dir>/LOG.md`, `<dir>/feedback.json` | the task itself: items, phases, statuses, blockers, decisions, links, log, the human's comments |
 | `scripts/review.py` | `cards.json` (+ `approvals.json`) | one page per group + a status board | reviewing many pieces of content (cells, sections, files) before they are published |
 
-Scripts live in this skill's folder: `S=<this skill's folder>/scripts` (usually `~/.claude/skills/tracker-page/scripts`). Python 3 stdlib only.
+Scripts live in this skill's folder: `S=<this skill's folder>/scripts` (`~/.claude/skills/tracker-page` for a global install, `.claude/skills/tracker-page` in a project). Python 3 stdlib only.
 
 ## Setting up a tracker
 
