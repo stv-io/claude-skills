@@ -23,7 +23,7 @@ The short version:
    top-left, never a bound label.
 5. **Square-cornered arrows**, filled triangle heads, coloured by the source's
    role; solid = now, dashed = later/optional/legacy, dotted = weak.
-6. **Official provider icons** via aws-diagrams / gcp-diagrams; every icon has text.
+6. **Official provider icons** (via the aws-diagrams / gcp-diagrams skills if you have them; separate, not in this repo); every icon has text.
 7. **Look at the rendered PNG** before you call it done.
 
 ## Reference figure
@@ -40,5 +40,5 @@ python3 scripts/reference.py --post                              # add to the li
 python3 scripts/reference.py --post --dy 1200                    # stack below existing work
 ```
 
-The canvas URL defaults to `http://127.0.0.1:3030`; override with `--canvas`.
+The canvas URL defaults to `http://127.0.0.1:3030`; override with `--canvas` (the canvas server's own default is port 3000).
 Render a PNG with the Excalidraw MCP `export_to_image` tool.
