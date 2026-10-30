@@ -2,14 +2,7 @@
 
 **Lets Claude check how much of your plan's 5-hour and weekly limits you've used, so it can warn you before starting something expensive (a big fan-out of subagents, a long workflow) instead of hitting the limit halfway through.**
 
-```mermaid
-flowchart LR
-  CC["Claude Code (interactive session)"] -- "status-line input, incl. rate_limits" --> SL["your status-line command"]
-  SL --> CAP["claude-usage-capture"]
-  CAP --> CACHE[("~/.claude/usage-cache.json")]
-  CACHE --> CU["claude-usage"]
-  CU --> A["Claude: 5h 44%, resets 15:10 · 7d 54%, resets Sun"]
-```
+<img alt="Claude Code passes rate limits to your status line, which pipes them into claude-usage-capture, which writes ~/.claude/usage-cache.json. claude-usage reads the cache, and Claude asks before a big run when the 5-hour window is at 80% or the week at 90%." src="../../assets/diagrams/claude-usage.png">
 
 Claude Code gives your plan's rate limits only to the **status-line command**. A one-line hook there saves them to a cache, and the skill reads the cache. Without the hook the skill has nothing to read.
 

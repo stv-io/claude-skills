@@ -2,19 +2,7 @@
 
 **macOS only. When your Mac's disk is full, Claude finds what's using the space and frees it one step at a time. Nothing is deleted until you approve it, and every step's real effect on free space is measured.**
 
-```mermaid
-flowchart TD
-  A["measure.sh: read-only baseline (APFS containers, free space, snapshots, biggest folders)"] --> B["Claude proposes candidates, biggest first, by tier: caches · tool data · personal files · git"]
-  B --> C{"You approve this step?"}
-  C -- no --> B
-  C -- yes --> D["run_step.py: free space before"]
-  D --> E{"--delete target allowed? not a symlink · inside your home folder · not a protected folder"}
-  E -- refused --> F["Logged as blocked"]
-  E -- allowed --> G["Run the clean command or delete"]
-  G --> H["Free space after: the measured change"]
-  H --> I["Tracker item and log updated"]
-  I --> B
-```
+<img alt="Baseline, propose, you approve, then run_step.py measures free space before and after each step and refuses symlinks, paths outside your home folder and top-level folders; results go to the tracker page, and the next candidate is proposed." src="../../assets/diagrams/mac-disk-cleanup.png">
 
 Disk cleanups go wrong in three ways: deleting something you wanted, killing something that was running, or reporting space that never came back. This skill measures first, agrees each step with you at the right level (one approval can cover a batch of caches; personal files are always one at a time), runs one step at a time, and checks the real change with `df`. It knows the usual developer hotspots and their own clean commands: uv, npm, Homebrew, Nix, Colima/Docker, Terraform providers, duplicate git clones. It also explains why freed space can stay "missing" until a Time Machine local snapshot clears.
 

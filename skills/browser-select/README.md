@@ -2,21 +2,7 @@
 
 **If you have more than one browser or profile connected to Claude in Chrome, Claude can act in the wrong one: your personal Google account for a work task, or the reverse. This skill makes Claude ask which one, and remember your answer for the session.**
 
-```mermaid
-sequenceDiagram
-  actor You
-  participant C as Claude
-  participant R as browsers CLI (~/.claude/browsers.json)
-  participant X as Claude in Chrome
-  You->>C: "Check the open tickets on my board"
-  C->>R: browsers list (your names for each browser)
-  C->>X: list_connected_browsers
-  C->>You: Which browser? work-chrome · personal-dia · …
-  You->>C: work-chrome
-  C->>R: browsers get work-chrome
-  R-->>C: deviceId
-  C->>X: select_browser(deviceId), then the task
-```
+<img alt="You ask Claude to check your board; Claude lists your named browsers and the connected ones, asks which to use, gets the deviceId for work-chrome from the browsers CLI, and selects that browser in Claude in Chrome. personal-dia and work-dia are left alone." src="../../assets/diagrams/browser-select.png">
 
 Claude in Chrome identifies each browser by an opaque `deviceId` and a generic name ("Browser 1") that changes between sessions. This skill keeps a small registry of friendly names (`work-chrome`, `personal-dia`) and the `browsers` CLI that reads it. If you say *"use my personal browser"*, Claude resolves it without asking. If you don't name one, it asks.
 

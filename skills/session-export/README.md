@@ -2,15 +2,7 @@
 
 **Turns a Claude Code session into a clean Markdown file you can share with your team: what you asked, what Claude answered, and what it did, without the noise.**
 
-```mermaid
-flowchart LR
-  J[("session transcript (.jsonl) under ~/.claude/projects/")] --> E["session-export"]
-  E --> K["keep: prompts, Claude's answers, one line per tool call, links and files written"]
-  E --> D["drop: thinking, tool output, subagent transcripts"]
-  E --> M["mask: home folder → ~, known token formats → «redacted»"]
-  K --> O["shareable .md with contents and outcomes"]
-  M --> O
-```
+<img alt="session-export reads the session transcript and sends prompts, answers and one line per tool call to the shareable Markdown, leaves out thinking, tool output and subagent transcripts, and masks the home folder and known token formats on a best-effort basis." src="../../assets/diagrams/session-export.png">
 
 `/export` gives you the raw terminal: box-drawing tables, wrapped diffs, every tool result. This gives you numbered prompts, Claude's original Markdown, tool calls collapsed into one line each, a contents list and a list of outcomes. You can export a range of prompts and set a title.
 
