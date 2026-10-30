@@ -281,12 +281,16 @@ def main():
 
     if a.list:
         files = sorted(project.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+        listed = 0
         for f in files:
             ts, n = turns(f)
             if not ts:
                 continue
+            listed += 1
             first = when(meta["ts"][0]) if (meta := n)["ts"] else None
             print(f"{f.stem[:8]}  {first:%Y-%m-%d %H:%M}  {len(ts):3} prompts  {n.get('title') or first_line(ts[0]['prompt'], 60)}")
+        if not listed:
+            print(f"session-export: no sessions in {project}", file=sys.stderr)
         return
 
     path = resolve(a.session, project)

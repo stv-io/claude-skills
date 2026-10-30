@@ -11,7 +11,7 @@ CACHE="$HOME/.claude/usage-cache.json"
 STALE_SECS="${CLAUDE_USAGE_STALE_SECS:-300}"
 
 if [ ! -s "$CACHE" ]; then
-  echo "claude-usage: no data yet ($CACHE missing) — start an interactive Claude Code session" >&2
+  echo "claude-usage: no data yet ($CACHE missing). Your status-line command must pipe its input into claude-usage-capture (see the skill README), and an interactive Claude Code session must be open." >&2
   exit 1
 fi
 
