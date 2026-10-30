@@ -8,6 +8,11 @@
 #
 # Exit codes: 0 ok, 1 no data, 2 data is stale (> STALE_SECS old; still printed).
 CACHE="$HOME/.claude/usage-cache.json"
+
+if ! jq -n '1 | strflocaltime("%H")' >/dev/null 2>&1; then
+  echo "claude-usage: needs jq 1.6 or later (brew install jq, or see https://jqlang.org/download/)" >&2
+  exit 1
+fi
 STALE_SECS="${CLAUDE_USAGE_STALE_SECS:-300}"
 
 if [ ! -s "$CACHE" ]; then

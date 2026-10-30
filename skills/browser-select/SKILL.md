@@ -1,6 +1,6 @@
 ---
 name: browser-select
-description: Resolve a friendly browser name (e.g. dia-work, dia-personal, chrome-work, chrome-client) to the deviceId the claude-in-chrome MCP tools need, and pick the right browser when none was named. Use BEFORE any mcp__claude-in-chrome__* tool call, whenever the user names a browser or profile, says "wrong browser"/"switch browser"/"use my work browser", when a browser action fails because the extension is disconnected or re-authenticated, or when registering a newly installed browser.
+description: Make Claude ask which browser profile to act in when more than one is connected to Claude in Chrome, and resolve a friendly name (e.g. work-chrome, personal-dia) to the deviceId the mcp__claude-in-chrome__* tools need. Use when more than one browser is registered and a Claude in Chrome action is about to start, when the user names a browser or profile, says "wrong browser"/"switch browser"/"use my work browser", when a browser action fails because the extension disconnected or re-authenticated, or when registering a newly installed browser.
 ---
 
 # Picking the right browser
@@ -16,6 +16,9 @@ profile means the wrong Google account, wrong Jira tenant, and work data
 touched from a personal session.
 
 ## The rule
+
+This applies once the registry holds more than one browser. With none or one registered (`browsers list`), carry on as normal and offer to register them if the user mentions several profiles.
+
 
 **Unless the user has named a profile, ask which one to use. Always. Never
 choose on their behalf.**

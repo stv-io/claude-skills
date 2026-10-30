@@ -1,6 +1,6 @@
 ---
 name: session-export
-description: Export a Claude Code session as clean, shareable Markdown — numbered prompts, Claude's original answers, tool calls collapsed, a contents list and outcomes, home paths and credentials masked. Use for "/session-export", "export this session/thread/conversation", "share this session with the team", "write up this conversation as markdown", or when /export output is broken (box-drawing tables, wrapped diffs).
+description: Export a Claude Code session as clean, shareable Markdown — numbered prompts, Claude's original answers, tool calls collapsed, a contents list and outcomes, home paths and common credential formats masked (best-effort; review before sharing). Use for "/session-export", "export this session/thread/conversation", "share this session with the team", "write up this conversation as markdown", or when /export output is broken (box-drawing tables, wrapped diffs).
 ---
 
 # Session export
@@ -29,6 +29,7 @@ Other flags: `--title`, `--start-at REGEX`, `-C DIR` (another project), `--no-ou
 
 - **In:** prompts, including ones sent mid-turn (labelled); Claude's text answers; one line per tool call; answers to Claude's multiple-choice questions; a list of files written and links mentioned.
 - **Out:** thinking, tool output, screenshots (noted as attached), subagent transcripts, the summary written after context compaction, system reminders, and relayed subagent reports.
-- **Masked:** the home directory becomes `~`. Atlassian, GitHub, Slack, AWS, Anthropic/OpenAI and Grafana tokens, private keys and JWTs are masked, as is any `*_TOKEN=`, `*_SECRET=`, `*PASSWORD=` or `*API_KEY=` value. `$VAR` references are left alone.
+- **Reads:** the session transcripts Claude Code keeps under `~/.claude/projects/`. It writes only the output file you name.
+- **Masked (best-effort):** the home directory becomes `~`. Atlassian, GitHub, Slack, AWS, Anthropic/OpenAI and Grafana tokens, private keys and JWTs are masked, as is any `*_TOKEN=`, `*_SECRET=`, `*PASSWORD=` or `*API_KEY=` value. `$VAR` references are left alone. Masking is pattern-based: a secret in an unknown format gets through, so the output always needs a read before it's shared.
 
 It reads Claude Code's session JSONL, which is undocumented and changes between releases. If prompts go missing or tool calls show up as text, the record shapes have moved. Fix `events()` in `bin/session-export`.

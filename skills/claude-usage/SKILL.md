@@ -1,6 +1,6 @@
 ---
 name: claude-usage
-description: Check the user's Claude plan usage — the 5-hour session limit and the 7-day weekly limit (percent used, time to reset). Use for "/claude-usage", "how much usage do I have left", "what's my session usage", "when does my limit reset", "am I close to the limit", and BEFORE launching anything expensive (workflows, fan-outs of many subagents) to decide whether there is headroom.
+description: Check the user's Claude plan usage (needs a one-line status-line hook, set up once) — the 5-hour session limit and the 7-day weekly limit (percent used, time to reset). Use for "/claude-usage", "how much usage do I have left", "what's my session usage", "when does my limit reset", "am I close to the limit", and BEFORE launching anything expensive (workflows, fan-outs of many subagents) to decide whether there is headroom.
 ---
 
 # Claude plan usage
@@ -29,7 +29,7 @@ A window is `null` when no live reading exists (e.g. the 5h window just rolled o
 | code | meaning | what to do |
 |---|---|---|
 | 0 | fresh data | use it |
-| 1 | no data (cache missing/unreadable) | say so; don't guess |
+| 1 | no data (cache missing/unreadable), or jq missing | say so and point to the setup in the skill's README; don't guess |
 | 2 | stale (> 5 min old; override with `CLAUDE_USAGE_STALE_SECS`) | still printed; report it with its age |
 
 ## Reading it

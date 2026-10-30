@@ -8,6 +8,10 @@ run_dir=${1:?usage: measure.sh <run-dir>}
 mkdir -p "$run_dir/reports"
 report="$run_dir/reports/$(date +%Y%m%d-%H%M%S)-baseline.txt"
 
+if [ "$(uname -s)" != Darwin ]; then
+  echo "mac-disk-cleanup is macOS only (uname: $(uname -s))" >&2
+  exit 1
+fi
 if ! command -v dust >/dev/null; then
   echo "dust not found: brew install dust (du is far slower on large homes)" >&2
   exit 1
