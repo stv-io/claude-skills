@@ -2,11 +2,6 @@
 
 Six Claude Code skills I use every day: a live status page for long agent runs, a house style for diagrams, and the chores around them. MIT licensed.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/tracker-page-dark.png">
-  <img alt="tracker-page: a live status page with a progress bar, blocked and decision panels, phases of items with statuses, and a recent-activity timeline." src="assets/tracker-page.png">
-</picture>
-
 ## Skills
 
 | Skill | What it solves | Platform | Needs | Touches |
@@ -45,25 +40,40 @@ npx skills remove session-export -g         # one skill
 
 ### tracker-page
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/tracker-page-dark.png">
+  <img alt="A live status page with a progress bar, blocked and decision panels, phases of items with statuses, and a recent-activity timeline." src="assets/tracker-page.png">
+</picture>
+
 A live local page for a long task, driven by one `status.json` that Claude updates after every step: phases, statuses, blockers, decisions for you, links, an activity log. Leave comments on any item and press **Send to Claude**. It also builds side-by-side review pages (before/after, Approve/Hold) for approving content in batches. [Read more →](skills/tracker-page)
 
 ### mac-disk-cleanup
+
+<img alt="mac-disk-cleanup: baseline, propose, you approve, then a guarded and measured step, logged in a tracker page." src="assets/diagrams/mac-disk-cleanup.png">
 
 Measures first, proposes candidates biggest-first by risk tier, and asks before every step (personal files always one at a time). Each step's real gain is measured with `df` and logged in a tracker page. It knows the usual developer hotspots and their own clean commands, and it refuses to delete symlinks, anything outside your home folder, or top-level folders like `~/Documents`. [Read more →](skills/mac-disk-cleanup)
 
 ### session-export
 
+<img alt="session-export: prompts, answers and one line per tool call go into the Markdown; thinking and tool output are left out; known secrets are masked." src="assets/diagrams/session-export.png">
+
 Numbered prompts, Claude's original answers, one line per tool call, a contents list and outcomes, for the whole session or a range of prompts. Home paths and common token formats are masked. Read the file before you share it. [Read more →](skills/session-export)
 
 ### claude-usage
+
+<img alt="claude-usage: your status line feeds a cache that Claude reads before big runs." src="assets/diagrams/claude-usage.png">
 
 Your status line saves the plan's rate limits to a cache; the skill reads it, so Claude can tell you "5h: 44%, resets 15:10" and ask before launching a big fan-out when you're close to a limit. [Read more →](skills/claude-usage)
 
 ### diagram-style
 
+<img alt="diagram-style reference figure: colour by role, one font, a legend and a title that states the conclusion." src="skills/diagram-style/reference.png">
+
 One house style for architecture diagrams on an Excalidraw canvas: colour by role (open-color palette), Helvetica sizes, zone, card, chip and arrow rules, a title that states the conclusion, and a checklist before a figure is done. Every value is in `tokens.json`; `reference.py` draws a figure from them. The diagrams in this repo are drawn with it. [Read more →](skills/diagram-style)
 
 ### browser-select
+
+<img alt="browser-select: Claude asks which browser, gets its deviceId from the browsers CLI, and selects it in Claude in Chrome." src="assets/diagrams/browser-select.png">
 
 Gives each connected browser a name you choose (`work-chrome`, `personal-dia`), makes Claude ask which one to use when you haven't said, and keeps your answer for the session. [Read more →](skills/browser-select)
 
