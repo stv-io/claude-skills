@@ -8,6 +8,10 @@ run_dir=${1:?usage: measure.sh <run-dir>}
 mkdir -p "$run_dir/reports"
 report="$run_dir/reports/$(date +%Y%m%d-%H%M%S)-baseline.txt"
 
+if [ "$(uname -s)" != Darwin ]; then
+  echo "mac-disk-cleanup is macOS only (uname: $(uname -s))" >&2
+  exit 1
+fi
 if ! command -v dust >/dev/null; then
   echo "dust not found: brew install dust (du is far slower on large homes)" >&2
   exit 1
@@ -31,7 +35,7 @@ size() { # dust one level deep, biggest last; -x stays on this filesystem
   echo
   echo "## Cleanups possibly already running"
   pgrep -fl 'uv cache|nix-collect-garbage|nix-store --gc|brew cleanup|npm cache|tmutil delete' | grep -v pgrep || echo "(none)"
-  ls -d "$HOME"/disk-cleanup-tracker/runs/* 2>/dev/null | tail -3
+  find "$HOME/disk-cleanup-tracker/runs" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | tail -3
   echo
   echo "## Home"
   size "$HOME" 20

@@ -1,56 +1,102 @@
 # claude-skills
 
-A few Claude Code skills I use daily. MIT licensed.
+Six Claude Code skills I use every day: a live status page for long agent runs, a house style for diagrams, and the chores around them. MIT licensed.
 
-| Skill | What it does | Needs |
-|---|---|---|
-| [tracker-page](skills/tracker-page) | A live local HTML status page for long agent tasks, driven by one `status.json`. Also builds side-by-side review pages with Approve/Hold and an approvals file. | Python 3 (stdlib only); optional: [mdserve](https://github.com/jfernandez/mdserve), [crit](https://crit.md/) |
-| [browser-select](skills/browser-select) | Maps friendly names (`dia-work`, `chrome-personal`, …) to the deviceIds the Claude in Chrome MCP tools need, and makes Claude ask which browser to use instead of guessing. Ships the `browsers` CLI. | Python 3, the Claude in Chrome extension |
-| [claude-usage](skills/claude-usage) | Lets Claude check your plan's 5-hour and weekly usage before launching anything expensive. Ships `claude-usage` (reader) and `claude-usage-capture` (writer, fed by your status line). | bash, jq ≥ 1.6, a status-line command |
-| [mac-disk-cleanup](skills/mac-disk-cleanup) | Finds what is filling a Mac's disk and frees space one agreed step at a time: baseline with `dust`, a catalogue of developer hotspots (uv, npm, Nix, Colima, Terraform providers, git) with their native clean commands, measured before/after steps, local-snapshot reclaim, all logged in a tracker page. | Python 3, `dust`, [tracker-page](skills/tracker-page) |
+## Skills
 
-## Install
+| Skill | What it solves | Platform | Needs | Touches |
+|---|---|---|---|---|
+| [tracker-page](skills/tracker-page) | Long agent runs lose their state in the chat. Claude keeps it in one file and shows it as a live page on localhost, with comments you can leave for later. | macOS, Linux | Python 3 | writes a tracker folder in your project; serves 127.0.0.1 |
+| [mac-disk-cleanup](skills/mac-disk-cleanup) | A full disk, cleaned one approved and measured step at a time. **Deletes files after you approve each step.** | **macOS only** | Python 3, [dust](https://github.com/bootandy/dust), tracker-page | writes `~/disk-cleanup-tracker/`; deletes what you approve |
+| [session-export](skills/session-export) | Share a Claude Code session as clean Markdown, not a terminal dump. Credential masking is best-effort. | any | Python 3 | reads your session transcripts; writes the file you name |
+| [claude-usage](skills/claude-usage) | Claude checks your 5-hour and weekly plan usage before starting something expensive. **Needs a one-line status-line hook.** | macOS, Linux | bash, jq 1.6+ | writes `~/.claude/usage-cache.json` |
+| [diagram-style](skills/diagram-style) | Diagrams Claude draws look like one consistent set instead of a different sketch each time: colour by role, one font, title as the conclusion. | any | Python 3; an [Excalidraw canvas](https://github.com/yctimlin/mcp_excalidraw) to draw on | writes the figures you ask for |
+| [browser-select](skills/browser-select) | With several browsers connected to Claude in Chrome, Claude asks which one instead of acting in the wrong account. | any | [Claude in Chrome](https://claude.com/chrome) in 2+ browsers, Python 3 | writes `~/.claude/browsers.json` |
 
-The skills expect to live at `~/.claude/skills/<name>`. Symlink them:
+None of them use the network themselves.
+
+## Install (30 seconds)
+
+```bash
+npx skills add stv-io/claude-skills
+```
+
+It asks which skills and which agents to install for. Without `-g` they go into the current project (`.claude/skills/`); with `-g` into `~/.claude/skills/` for every project. To install one directly:
+
+```bash
+npx skills add stv-io/claude-skills --skill session-export -g
+```
+
+Two skills need a minute of setup after installing: [claude-usage](skills/claude-usage#set-up-the-status-line-hook-once) (a status-line hook) and [browser-select](skills/browser-select#set-up-name-your-browsers-once) (name your browsers). Each skill's README lists what it needs, with install and check commands.
+
+## Update or remove
+
+```bash
+npx skills update -g                        # all skills installed with -g
+npx skills remove session-export -g         # one skill
+```
+
+## What they do
+
+### tracker-page
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/tracker-page-dark.png">
+  <img alt="A live status page with a progress bar, blocked and decision panels, phases of items with statuses, and a recent-activity timeline." src="assets/tracker-page.png">
+</picture>
+
+A live local page for a long task, driven by one `status.json` that Claude updates after every step: phases, statuses, blockers, decisions for you, links, an activity log. Leave comments on any item and press **Send to Claude**. It also builds side-by-side review pages (before/after, Approve/Hold) for approving content in batches. [Read more →](skills/tracker-page)
+
+### mac-disk-cleanup
+
+<img alt="mac-disk-cleanup: baseline, propose, you approve, then a guarded and measured step, logged in a tracker page." src="assets/diagrams/mac-disk-cleanup.png">
+
+Measures first, proposes candidates biggest-first by risk tier, and asks before every step (personal files always one at a time). Each step's real gain is measured with `df` and logged in a tracker page. It knows the usual developer hotspots and their own clean commands, and it refuses to delete symlinks, anything outside your home folder, or top-level folders like `~/Documents`. [Read more →](skills/mac-disk-cleanup)
+
+### session-export
+
+<img alt="session-export: prompts, answers and one line per tool call go into the Markdown; thinking and tool output are left out; known secrets are masked." src="assets/diagrams/session-export.png">
+
+Numbered prompts, Claude's original answers, one line per tool call, a contents list and outcomes, for the whole session or a range of prompts. Home paths and common token formats are masked. Read the file before you share it. [Read more →](skills/session-export)
+
+### claude-usage
+
+<img alt="claude-usage: your status line feeds a cache that Claude reads before big runs." src="assets/diagrams/claude-usage.png">
+
+Your status line saves the plan's rate limits to a cache; the skill reads it, so Claude can tell you "5h: 44%, resets 15:10" and ask before launching a big fan-out when you're close to a limit. [Read more →](skills/claude-usage)
+
+### diagram-style
+
+<img alt="diagram-style reference figure: colour by role, one font, a legend and a title that states the conclusion." src="skills/diagram-style/reference.png">
+
+One house style for architecture diagrams on an Excalidraw canvas: colour by role (open-color palette), Helvetica sizes, zone, card, chip and arrow rules, a title that states the conclusion, and a checklist before a figure is done. Every value is in `tokens.json`; `reference.py` draws a figure from them. The diagrams in this repo are drawn with it. [Read more →](skills/diagram-style)
+
+### browser-select
+
+<img alt="browser-select: Claude asks which browser, gets its deviceId from the browsers CLI, and selects it in Claude in Chrome." src="assets/diagrams/browser-select.png">
+
+Gives each connected browser a name you choose (`work-chrome`, `personal-dia`), makes Claude ask which one to use when you haven't said, and keeps your answer for the session. [Read more →](skills/browser-select)
+
+## Hacking on these
+
+To edit the skills and have changes take effect immediately, clone the repo and symlink the folders instead of installing copies:
 
 ```bash
 git clone https://github.com/stv-io/claude-skills.git ~/code/claude-skills
-for s in tracker-page browser-select claude-usage mac-disk-cleanup; do
+for s in tracker-page browser-select claude-usage session-export mac-disk-cleanup diagram-style; do
   ln -s ~/code/claude-skills/skills/$s ~/.claude/skills/$s
 done
-# Codex reads skills from ~/.codex/skills as well
-ln -s ~/code/claude-skills/skills/mac-disk-cleanup ~/.codex/skills/mac-disk-cleanup
-# CLIs on your PATH
-ln -s ~/code/claude-skills/skills/browser-select/bin/browsers        ~/bin/browsers
-ln -s ~/code/claude-skills/skills/claude-usage/bin/claude-usage      ~/.local/bin/claude-usage
+# Optional: put the CLIs on your PATH
+ln -s ~/code/claude-skills/skills/browser-select/bin/browsers           ~/.local/bin/browsers
+ln -s ~/code/claude-skills/skills/claude-usage/bin/claude-usage         ~/.local/bin/claude-usage
 ln -s ~/code/claude-skills/skills/claude-usage/bin/claude-usage-capture ~/.local/bin/claude-usage-capture
+ln -s ~/code/claude-skills/skills/session-export/bin/session-export     ~/.local/bin/session-export
 ```
 
-### tracker-page: optional tools
+Don't run `npx skills add` over these symlinks: it replaces them with copies without asking.
 
-Neither is required; the page works without them.
+tracker-page has tests (`uv` is all you need); see [its SKILL.md](skills/tracker-page/SKILL.md#changing-the-scripts).
 
-```bash
-brew install mdserve   # linked .md files open formatted instead of as plain text
-brew install crit      # inline comments on a served tracker or review page: crit http://localhost:8765
-```
+## License
 
-### claude-usage: feed it from your status line
-
-Claude Code passes `rate_limits` only to the status-line command. Add one line to yours (see `statusLine` in `~/.claude/settings.json`):
-
-```bash
-input=$(cat)
-printf '%s' "$input" | claude-usage-capture   # writes ~/.claude/usage-cache.json
-# ...the rest of your status line...
-```
-
-The cache refreshes only while an interactive session is open.
-
-### browser-select: register your browsers
-
-The registry lives at `~/.claude/browsers.json`, outside this repo. Bind each browser while it is connected:
-
-```bash
-browsers help-register
-```
+[MIT](LICENSE)

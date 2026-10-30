@@ -1,6 +1,6 @@
 ---
 name: browser-select
-description: Resolve a friendly browser name (e.g. dia-work, dia-personal, chrome-work, chrome-client) to the deviceId the claude-in-chrome MCP tools need, and pick the right browser when none was named. Use BEFORE any mcp__claude-in-chrome__* tool call, whenever the user names a browser or profile, says "wrong browser"/"switch browser"/"use my work browser", when a browser action fails because the extension is disconnected or re-authenticated, or when registering a newly installed browser.
+description: Make Claude ask which browser profile to act in when more than one is connected to Claude in Chrome, and resolve a friendly name (e.g. work-chrome, personal-dia) to the deviceId the mcp__claude-in-chrome__* tools need. Use when more than one browser is registered and a Claude in Chrome action is about to start, when the user names a browser or profile, says "wrong browser"/"switch browser"/"use my work browser", when a browser action fails because the extension disconnected or re-authenticated, or when registering a newly installed browser.
 ---
 
 # Picking the right browser
@@ -9,13 +9,15 @@ The user runs several browsers against the same Claude account — different
 profiles with different logins and permission boundaries. The MCP layer only
 exposes an opaque `deviceId` and a generic extension name ("Browser 1"), so
 sessions pick the wrong one. `~/.claude/browsers.json` maps friendly aliases to
-deviceIds; the `browsers` CLI (`bin/browsers` in this skill, installed on your PATH) reads and maintains it.
+deviceIds; the `browsers` CLI (`bin/browsers` in this skill's folder; if `browsers` isn't on your PATH, run it by that full path) reads and maintains it.
 
 **Using the wrong browser is a real failure, not a cosmetic one** — the wrong
 profile means the wrong Google account, wrong Jira tenant, and work data
 touched from a personal session.
 
 ## The rule
+
+This applies once the registry holds more than one browser. With none or one registered (`browsers list`), carry on as normal and offer to register them if the user mentions several profiles.
 
 **Unless the user has named a profile, ask which one to use. Always. Never
 choose on their behalf.**

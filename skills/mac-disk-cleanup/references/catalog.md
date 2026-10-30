@@ -41,7 +41,7 @@ Sizes are what `dust` reports as allocated. They are not a promise of free space
 
 **Terraform/OpenTofu provider binaries in projects**
 - **Where:** `.terraform` and `.terragrunt-cache` under the code folders.
-- **Clean:** `scripts/provider_binaries.py scan ~/code out.json`, review, then `… delete out.json`. Only provider binaries are touched; state and `.terraform.lock.hcl` stay.
+- **Clean:** `scripts/provider_binaries.py scan <projects-folder> out.json`, review, then `… delete out.json`. Only provider binaries are touched; state and `.terraform.lock.hcl` stay.
 - **Aftercare:** every project needs `init` before its next plan.
 - **Prevent:** set `TF_PLUGIN_CACHE_DIR` so projects share one copy. 25 GiB in one run.
 

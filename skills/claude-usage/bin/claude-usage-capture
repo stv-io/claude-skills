@@ -13,7 +13,7 @@ USAGE_CACHE="$HOME/.claude/usage-cache.json"
 input=$(cat)
 mkdir -p "${USAGE_CACHE%/*}"
 [ -s "$USAGE_CACHE" ] || echo '{}' > "$USAGE_CACHE"
-printf '%s' "$input" | jq -c --arg now "$(date +%s)" --slurpfile old "$USAGE_CACHE" '
+if printf '%s' "$input" | jq -c --arg now "$(date +%s)" --slurpfile old "$USAGE_CACHE" '
   ($now|tonumber) as $t
   | def live(w): if w and w.resets_at and (w.resets_at > $t) then w else null end;
     def pick(a; b):
@@ -28,6 +28,9 @@ printf '%s' "$input" | jq -c --arg now "$(date +%s)" --slurpfile old "$USAGE_CAC
   | {captured_at: $t, session_id,
      rate_limits: ({} + (if $f then {five_hour: $f} else {} end)
                       + (if $s then {seven_day: $s} else {} end))}' \
-  > "$USAGE_CACHE.$$" 2>/dev/null && [ -s "$USAGE_CACHE.$$" ] \
-  && mv -f "$USAGE_CACHE.$$" "$USAGE_CACHE" || rm -f "$USAGE_CACHE.$$"
+  > "$USAGE_CACHE.$$" 2>/dev/null && [ -s "$USAGE_CACHE.$$" ]; then
+  mv -f "$USAGE_CACHE.$$" "$USAGE_CACHE"
+else
+  rm -f "$USAGE_CACHE.$$"
+fi
 exit 0

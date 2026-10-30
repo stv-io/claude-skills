@@ -1,6 +1,6 @@
 ---
 name: mac-disk-cleanup
-description: Find what is filling a Mac's disk and free space safely, one agreed step at a time, with every step measured and logged in a live tracker page. Use for "disk space notification", "my disk is full", "free up space", "what's using my disk", "clean up caches", "/mac-disk-cleanup", or when a tool fails with "No space left on device". Covers APFS containers, Time Machine local snapshots, developer caches (uv, npm, Homebrew, Terraform/Terragrunt, Nix, Colima/Docker), project build output, duplicate git clones, models, VMs and Downloads.
+description: macOS only. Find what is filling a Mac's disk and free space safely, one agreed step at a time, with every step measured and logged in a live tracker page. Use for "disk space notification", "my disk is full", "free up space", "what's using my disk", "clean up caches", "/mac-disk-cleanup". When a tool fails with "No space left on device", offer this skill rather than starting a cleanup unasked. Covers APFS containers, Time Machine local snapshots, developer caches (uv, npm, Homebrew, Terraform/Terragrunt, Nix, Colima/Docker), project build output, duplicate git clones, models, VMs and Downloads.
 ---
 
 # Mac disk cleanup
@@ -11,10 +11,11 @@ A disk cleanup goes wrong in three ways: deleting something the user wanted, kil
 - **run** one step at a time, measuring free space before and after;
 - **log** the step.
 
-The hotspot list, with clean commands and gotchas, is in `references/catalog.md`. Read it before you propose cleanups. Scripts: `S=~/.claude/skills/mac-disk-cleanup/scripts`.
+The hotspot list, with clean commands and gotchas, is in `references/catalog.md`. Read it before you propose cleanups. Scripts: `S=<this skill's folder>/scripts` (`~/.claude/skills/mac-disk-cleanup` for a global install, `.claude/skills/mac-disk-cleanup` in a project).
 
 ## 0. Before touching anything
 
+- **macOS only.** If `uname -s` isn't `Darwin`, say so and stop; `measure.sh` refuses too. Check `dust` is installed (`brew install dust`).
 - **Is a cleanup already running?** Look for another agent (Claude, Codex) or a terminal running one: `pgrep -fl 'uv cache|nix-collect-garbage|brew cleanup|npm cache'`, and look for a recent run folder under `~/disk-cleanup-tracker/runs/`. If you find one, join that tracker and log there. Don't start a second one.
 - **Run the baseline:** `bash $S/measure.sh ~/disk-cleanup-tracker/runs/$(date +%F)`. It is read-only and reports:
   - which APFS container is full (the internal one is usually `disk3`; an external backup disk is a different container);
@@ -44,7 +45,7 @@ Use the [`tracker-page`](../tracker-page) skill (same repo; install it alongside
 
 ## 3. Run one step at a time
 
-- Run each agreed step with `python3 $S/run_step.py <run-dir> <item> -- <command…>`. For plain deletions use `--delete <paths…>`. It refuses symlinks, paths outside `$HOME` and top-level folders.
+- Run each agreed step with `python3 $S/run_step.py <run-dir> <item> -- <command…>`. For plain deletions use `--delete <paths…>`. `--delete` refuses symlinks, paths outside `$HOME`, and these folders themselves: `~`, `~/Library`, `~/Library/Application Support`, `~/Library/Caches`, `~/Documents`, `~/Desktop`, `~/Downloads`, `~/Pictures`, `~/code`, `~/.cache`, `~/.local`, `~/.local/share`, `~/.config`, `~/.ssh` (things inside them can still be deleted once approved).
 - It records `df -k` before and after, the output, the exit code, `results.jsonl`, and updates the tracker item and log.
 - **Before each step,** run that item's preflight from the catalogue: running processes, open files, git reachability. Re-check the scope right before deleting, not just when you proposed it.
 - **Stop owning processes gracefully,** and only the ones that block the step. Tell the user what will disconnect: for example, uv-launched MCP servers drop until `/mcp` reconnect.
@@ -55,7 +56,7 @@ Use the [`tracker-page`](../tracker-page) skill (same repo; install it alongside
 
 When a step shows little or no free-space gain, check local snapshots: `tmutil listlocalsnapshots /`.
 - If a snapshot was taken before the deletions, it holds the deleted blocks. Give the user `! sudo tmutil deletelocalsnapshots <date>` (or tell them it clears itself within about a day).
-- Re-measure afterwards with `df -k` (or `rtk proxy df -h`; filtered `df` output can drop the Avail column) and log the real number.
+- Re-measure afterwards with `df -k` and log the real number. If a shell wrapper or hook filters `df` output, check the Avail column survived.
 
 ## 5. Close the run
 
@@ -67,7 +68,7 @@ When a step shows little or no free-space gain, check local snapshots: `tmutil l
   - `uv cache prune` now and then;
   - asking before large downloads land in Downloads.
 - **Handover:** write `REVIEW-WHEN-BACK.md` in the run folder with the open decisions.
-- **Catalogue:** add any new lesson (new hotspot, new failure, new command) to `references/catalog.md` in this skill.
+- **Catalogue:** tell the user about any new lesson (new hotspot, new failure, new command) so it can go into `references/catalog.md` upstream. Don't edit the installed copy: `npx skills update` replaces it. In a clone of the repo, edit the file there.
 
 ## Rules
 

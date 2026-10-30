@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+"""Render a Claude Code session as shareable Markdown.
+
+Prompts are numbered and quoted, answers are Claude's original Markdown, tool calls are
+collapsed into <details>. Adds a contents list and an outcomes section, replaces the home
+directory with ~ and masks anything shaped like a credential. Thinking, tool output,
+screenshots, subagent transcripts and compaction summaries are never included.
+
+  session-export --list                      sessions for the current directory
+  session-export --prompts [SESSION]         numbered prompts, to pick a range
+  session-export [SESSION] -o out.md         SESSION: path, UUID or prefix; default latest
+  session-export --from 3 --to 9 -o out.md   prompts 3..9 only
+"""
+import argparse, json, re, sys
+from datetime import datetime
+from pathlib import Path
+
+HOME = str(Path.home())
+PROJECTS = Path.home() / ".claude" / "projects"
+
+SECRETS = [
+    (r"ATATT[A-Za-z0-9_\-=]{20,}", "atlassian-token"),
+    (r"\bgh[pousr]_[A-Za-z0-9]{30,}", "github-token"),
+    (r"\bgithub_pat_[A-Za-z0-9_]{30,}", "github-token"),
+    (r"\bxox[abposr]-[A-Za-z0-9-]{10,}", "slack-token"),
+    (r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b", "aws-key-id"),
+    (r"\bsk-(?:ant|proj|live)-[A-Za-z0-9_\-]{20,}", "api-key"),
+    (r"\bglc_[A-Za-z0-9+/=_-]{30,}", "grafana-token"),
+    (r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----", "private-key"),
+    (r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}", "jwt"),
+]
+# KEY=value / KEY: value where KEY names a secret; the value is masked, the key kept
+SECRET_ASSIGN = re.compile(
+    r"(?i)\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY)[A-Z0-9_]*)"
+    r"(\s*[=:]\s*)([\"']?)(?!\$|<|\{|\*|\")([^\s\"'`]{8,})")
+
+
+def project_dir(cwd):
+    return PROJECTS / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
+
+
+def records(path):
+    seen = set()
+    for line in path.read_text().splitlines():
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if r.get("uuid"):
+            if r["uuid"] in seen:
+                continue
+            seen.add(r["uuid"])
+        yield r
+
+
+def resolve(arg, project):
+    if arg:
+        p = Path(arg).expanduser()
+        if p.is_file():
+            return p
+        hits = sorted(project.glob(f"{arg}*.jsonl")) or sorted(PROJECTS.glob(f"*/{arg}*.jsonl"))
+        if len(hits) != 1:
+            sys.exit(f"session-export: {len(hits)} sessions match {arg!r}")
+        return hits[0]
+    files = sorted(project.glob("*.jsonl"), key=lambda f: f.stat().st_mtime)
+    if not files:
+        sys.exit(f"session-export: no sessions in {project}")
+    return files[-1]
+
+
+# --- turning records into prompts and assistant blocks ------------------------------------
+
+SKIP_PREFIXES = ("<local-command", "<command-name", "<command-message", "<bash-input", "<bash-stdout",
+                 "<bash-stderr", "<task-notification", "<system-reminder", "[Image:", "[Request interrupted",
+                 "Caveat:", "<user-prompt-submit-hook")
+
+
+def blocks_text(blocks):
+    texts = [b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text"]
+    texts = [t for t in texts if not t.lstrip().startswith(SKIP_PREFIXES)]
+    imgs = sum(1 for b in blocks if isinstance(b, dict) and b.get("type") == "image")
+    return "\n".join(texts), imgs
+
+
+def is_relay(text):
+    return "<agent-message" in text or text.lstrip().startswith("Another Claude session sent")
+
+
+def tool_desc(name, i):
+    if i.get("questions"):
+        return "asked: " + " / ".join(q.get("question", "") for q in i["questions"])
+    if name in ("Read", "Write", "Edit", "NotebookEdit") and i.get("file_path"):
+        return f"`{i['file_path']}`"
+    for k in ("description", "file_path", "jql", "query", "url", "prompt", "action", "pattern"):
+        if i.get(k):
+            return str(i[k]).replace("\n", " ")[:140]
+    return ""
+
+
+def events(path):
+    """Yield ('prompt', text, imgs, queued) | ('text', md) | ('tool', name, desc) | ('file', path)
+    | ('meta', key, value)."""
+    for r in records(path):
+        t = r.get("type")
+        if t == "ai-title":
+            yield ("meta", "title", r.get("aiTitle"))
+        if r.get("timestamp"):
+            yield ("meta", "ts", r["timestamp"])
+        if r.get("cwd"):
+            yield ("meta", "cwd", r["cwd"])
+        if r.get("isSidechain") or r.get("isMeta") or r.get("isCompactSummary"):
+            continue
+        if t == "user":
+            c = r["message"]["content"]
+            if isinstance(c, str):
+                if not c.lstrip().startswith(SKIP_PREFIXES) and not is_relay(c):
+                    yield ("prompt", c, 0, False)
+                continue
+            for b in c:
+                if b.get("type") == "tool_result":
+                    rc = b.get("content")
+                    rc = rc if isinstance(rc, str) else " ".join(
+                        x.get("text", "") for x in (rc or []) if isinstance(x, dict))
+                    if rc.startswith(("Your questions have been answered", "User has answered")):
+                        yield ("tool", "answer", rc.split(". You can now")[0])
+            text, imgs = blocks_text(c)
+            if (text.strip() or imgs) and not is_relay(text):
+                yield ("prompt", text, imgs, False)
+        elif t == "attachment" and r["attachment"].get("type") == "queued_command":
+            p = r["attachment"].get("prompt")
+            imgs = 0
+            if isinstance(p, str) and p.startswith("["):
+                try:
+                    p = json.loads(p)
+                except json.JSONDecodeError:
+                    pass
+            if isinstance(p, list):
+                p, imgs = blocks_text(p)
+            if isinstance(p, str) and not p.lstrip().startswith(SKIP_PREFIXES) and not is_relay(p):
+                yield ("prompt", re.sub(r"\[Image #\d+\]\s*", "", p), imgs, True)
+        elif t == "assistant":
+            for c in r["message"].get("content", []):
+                if c.get("type") == "text" and c["text"].strip():
+                    yield ("text", c["text"].strip())
+                elif c.get("type") == "tool_use":
+                    name = c["name"].replace("mcp__", "").replace("__", ":")
+                    i = c.get("input") or {}
+                    yield ("tool", name, tool_desc(c["name"], i))
+                    if c["name"] in ("Write", "Edit", "NotebookEdit") and i.get("file_path"):
+                        yield ("file", i["file_path"])
+
+
+def turns(path):
+    """Group events into turns: [{'prompt','imgs','queued','body':[...], 'files':[...]}], meta."""
+    meta, out, cur = {"ts": []}, [], None
+    for e in events(path):
+        if e[0] == "meta":
+            if e[1] == "ts":
+                meta["ts"].append(e[2])
+            elif e[2]:
+                meta[e[1]] = e[2]
+        elif e[0] == "prompt":
+            text = e[1].strip()
+            if not text and not e[2]:
+                continue
+            cur = {"prompt": text, "imgs": e[2], "queued": e[3], "body": [], "files": []}
+            out.append(cur)
+        elif cur is not None:
+            if e[0] == "file":
+                cur["files"].append(e[1])
+            else:
+                cur["body"].append(e)
+    return out, meta
+
+
+# --- rendering ------------------------------------------------------------------------------
+
+def first_line(text, n=90):
+    text = re.sub(r"<pasted_content[^>]*>.*?</pasted_content[^>]*>", "", text, flags=re.S)
+    text = re.sub(r"\[Image #\d+\]\s*", "", text)
+    line = next((l.strip() for l in text.splitlines() if l.strip()), "(pasted text or screenshot)")
+    line = re.sub(r"[`*_\[\]<>|]", "", line)
+    return line if len(line) <= n else line[:n - 1].rstrip() + "…"
+
+
+def render_prompt(t, n):
+    text = t["prompt"]
+    m = re.search(r"<pasted_content[^>]*>\n?(.*?)</pasted_content[^>]*>", text, re.S)
+    if m:
+        text = text.replace(m.group(0), "").strip() + f"\n\n```\n{m.group(1).strip()}\n```"
+    quoted = "\n".join("> " + l if l else ">" for l in text.splitlines()) or ">"
+    label = " (sent while Claude was working)" if t["queued"] else ""
+    out = [f'<a id="p{n}"></a>', "", f"## {n}. {first_line(t['prompt'], 70)}{label}", "", quoted]
+    if t["imgs"]:
+        out += [">", f"> *[{t['imgs']} screenshot{'s' * (t['imgs'] > 1)} attached, not included]*"]
+    return out
+
+
+def render_body(body):
+    out, tools = [], []
+
+    def flush():
+        if tools:
+            out.extend(["", f"<details><summary>{len(tools)} tool call{'s' * (len(tools) > 1)}</summary>", ""])
+            out.extend(f"- `{name}` — {desc}" if desc else f"- `{name}`" for name, desc in tools)
+            out.extend(["", "</details>"])
+            tools.clear()
+
+    for e in body:
+        if e[0] == "text":
+            flush()
+            out.extend(["", e[1]])
+        else:
+            tools.append((e[1], e[2]))
+    flush()
+    return out
+
+
+def outcomes(selected):
+    files, links = [], []
+    for t in selected:
+        for f in t["files"]:
+            # session scratch space is not an outcome
+            if f not in files and not re.match(r"(/private)?/(tmp|var/folders)/", f):
+                files.append(f)
+        for e in t["body"]:
+            if e[0] == "text":
+                for u in re.findall(r"https?://[^\s)>\]`'\"|]+", e[1]):
+                    u = u.rstrip(".,;:*_")
+                    if u not in links:
+                        links.append(u)
+    out = []
+    if files:
+        out += ["**Files written or edited**", ""] + [f"- `{f}`" for f in files] + [""]
+    if links:
+        out += ["**Links mentioned**", ""] + [f"- <{u}>" for u in links] + [""]
+    return out
+
+
+def redact(text):
+    hits = {}
+
+    def sub(label):
+        def f(m):
+            hits[label] = hits.get(label, 0) + 1
+            return f"«redacted:{label}»"
+        return f
+
+    for pat, label in SECRETS:
+        text = re.sub(pat, sub(label), text)
+
+    def assign(m):
+        hits["secret-assignment"] = hits.get("secret-assignment", 0) + 1
+        return f"{m.group(1)}{m.group(2)}{m.group(3)}«redacted»"
+
+    text = SECRET_ASSIGN.sub(assign, text)
+    return text, hits
+
+
+def when(ts):
+    return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone()
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter,
+                                 epilog=__doc__.split("\n\n", 2)[2])
+    ap.add_argument("session", nargs="?", help="JSONL path, session UUID or prefix (default: latest)")
+    ap.add_argument("-o", "--out", help="output file (default: stdout)")
+    ap.add_argument("-C", "--cwd", default=Path.cwd(), help="project directory (default: current)")
+    ap.add_argument("--list", action="store_true", help="list sessions for the project")
+    ap.add_argument("--prompts", action="store_true", help="list the session's numbered prompts")
+    ap.add_argument("--from", dest="start", type=int, help="first prompt number to include")
+    ap.add_argument("--to", dest="end", type=int, help="last prompt number to include")
+    ap.add_argument("--start-at", help="regex: start at the first prompt that matches")
+    ap.add_argument("--stop-at", help="regex: stop before the first prompt that matches")
+    ap.add_argument("--title", help="document title (default: the session's own title)")
+    ap.add_argument("--no-outcomes", action="store_true", help="omit the outcomes section")
+    a = ap.parse_args()
+    project = project_dir(Path(a.cwd).expanduser().resolve())
+
+    if a.list:
+        files = sorted(project.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+        listed = 0
+        for f in files:
+            ts, n = turns(f)
+            if not ts:
+                continue
+            listed += 1
+            first = when(meta["ts"][0]) if (meta := n)["ts"] else None
+            print(f"{f.stem[:8]}  {first:%Y-%m-%d %H:%M}  {len(ts):3} prompts  {n.get('title') or first_line(ts[0]['prompt'], 60)}")
+        if not listed:
+            print(f"session-export: no sessions in {project}", file=sys.stderr)
+        return
+
+    path = resolve(a.session, project)
+    all_turns, meta = turns(path)
+    if a.prompts:
+        for i, t in enumerate(all_turns, 1):
+            print(f"{i:3}. {'(queued) ' if t['queued'] else ''}{first_line(t['prompt'], 100)}")
+        return
+
+    lo, hi = (a.start or 1), (a.end or len(all_turns))
+    numbered = list(enumerate(all_turns, 1))
+    if a.start_at:
+        k = next((i for i, t in numbered if re.search(a.start_at, t["prompt"])), None)
+        lo = max(lo, k) if k else sys.exit(f"session-export: no prompt matches {a.start_at!r}")
+    if a.stop_at:
+        k = next((i for i, t in numbered if i > lo and re.search(a.stop_at, t["prompt"])), None)
+        hi = min(hi, k - 1) if k else hi
+    selected = [t for i, t in numbered if lo <= i <= hi]
+    if not selected:
+        sys.exit("session-export: no prompts in range")
+
+    title = a.title or meta.get("title") or first_line(selected[0]["prompt"], 80)
+    ts = meta["ts"]
+    span = f"{when(ts[0]):%Y-%m-%d}" if ts else "unknown date"
+    if ts and when(ts[-1]).date() != when(ts[0]).date():
+        span += f" to {when(ts[-1]):%Y-%m-%d}"
+    scope = "" if (lo, hi) == (1, len(all_turns)) else f" Prompts {lo}–{hi} of {len(all_turns)}."
+    doc = [f"# {title}", "",
+           f"*Claude Code session, {span}, working directory `{meta.get('cwd', '?')}`.{scope} "
+           "Prompts are quoted; answers are Claude's original Markdown; tool calls are collapsed. "
+           "Screenshots and tool output are not included.*", "",
+           "## Contents", ""]
+    doc += [f"{n}. [{first_line(t['prompt'], 90)}](#p{n})" for n, t in enumerate(selected, 1)] + [""]
+    if not a.no_outcomes:
+        oc = outcomes(selected)
+        if oc:
+            doc += ["## Outcomes", ""] + oc
+    for n, t in enumerate(selected, 1):
+        doc += ["---", ""] + render_prompt(t, n) + render_body(t["body"]) + [""]
+
+    body = "\n".join(doc).replace(HOME, "~")
+    # GFM needs a blank line between a paragraph and a following table
+    body = re.sub(r"(?m)^([^|\n][^\n]*)\n(\|[^\n]*\|\n\|[-:| ]+\|)", r"\1\n\n\2", body)
+    body = re.sub(r"\n{3,}", "\n\n", body).strip() + "\n"
+    body, hits = redact(body)
+
+    if a.out:
+        Path(a.out).expanduser().write_text(body)
+        print(f"session-export: {len(selected)} prompts from {path.stem[:8]} written to {a.out}", file=sys.stderr)
+    else:
+        sys.stdout.write(body)
+    if hits:
+        print("session-export: masked " + ", ".join(f"{v} {k}" for k, v in sorted(hits.items()))
+              + " — check the «redacted» spots before sharing", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

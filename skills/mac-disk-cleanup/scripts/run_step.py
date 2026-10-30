@@ -17,8 +17,12 @@ import shutil
 import subprocess
 import sys
 
-TRACKER = pathlib.Path.home() / ".claude/skills/tracker-page/scripts/tracker.py"
-HOME = pathlib.Path.home()
+HOME = pathlib.Path.home().resolve()  # resolved, so targets (also resolved) compare correctly when $HOME has a symlink in it
+# tracker-page is a sibling skill: next to this one as installed, in the repo it links to, or in ~/.claude/skills
+HERE = pathlib.Path(__file__).absolute().parent
+TRACKER = next((p for p in (HERE.parent.parent / "tracker-page/scripts/tracker.py",
+                            HERE.resolve().parent.parent / "tracker-page/scripts/tracker.py",
+                            HOME / ".claude/skills/tracker-page/scripts/tracker.py") if p.exists()), None)
 PROTECTED = {HOME, *(HOME / p for p in (
     "Library", "Library/Application Support", "Library/Caches", "Documents", "Desktop",
     "Downloads", "Pictures", "code", ".cache", ".local", ".local/share", ".config", ".ssh",
@@ -31,7 +35,7 @@ def free_bytes():
 
 
 def track(run_dir, *args):
-    if TRACKER.exists():
+    if TRACKER and (run_dir / "status.json").exists():
         subprocess.run([sys.executable, str(TRACKER), args[0], str(run_dir), *args[1:]],
                        check=False, stdout=subprocess.DEVNULL)
 
@@ -41,10 +45,10 @@ def check_delete_target(raw):
     if p.is_symlink():
         raise SystemExit(f"refusing symlink: {p}")
     p = p.resolve()
-    if HOME not in p.parents:
-        raise SystemExit(f"refusing path outside $HOME: {p}")
     if p in PROTECTED:
         raise SystemExit(f"refusing top-level folder: {p}")
+    if HOME not in p.parents:
+        raise SystemExit(f"refusing path outside $HOME: {p}")
     return p
 
 
