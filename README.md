@@ -1,5 +1,7 @@
 # claude-skills
 
+[![skills.sh](https://skills.sh/b/stv-io/claude-skills)](https://skills.sh/stv-io/claude-skills)
+
 Six Claude Code skills I use every day: a live status page for long agent runs, a house style for diagrams, and the chores around them. MIT licensed.
 
 ## Skills
