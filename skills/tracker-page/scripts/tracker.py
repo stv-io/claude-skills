@@ -52,9 +52,9 @@ CSS = '''
 details.box>summary{list-style:none;cursor:pointer}details.box>summary::-webkit-details-marker{display:none}
 details.box:not([open])>summary{border-bottom:0;border-radius:6px}
 details.box>summary:before{content:"▸";color:var(--mute);font-size:11px;transition:transform .15s}details.box[open]>summary:before{transform:rotate(90deg)}
-.row{display:grid;grid-template-columns:20px 28px minmax(0,1fr) auto auto;gap:0 10px;align-items:start;padding:10px 16px;border-top:1px solid var(--line)}
+.row{display:grid;grid-template-columns:20px min(var(--idw,28px),25%) minmax(0,1fr) auto auto;gap:0 10px;align-items:start;padding:10px 16px;border-top:1px solid var(--line)}
 .box>summary+.row,.box>.row:first-child{border-top:0}.row:hover{background:color-mix(in srgb,var(--sub) 70%,transparent)}
-.row .t{font-weight:600;overflow-wrap:anywhere}.row.done .t{font-weight:400;color:var(--mute)}
+.row .t{font-weight:600;overflow-wrap:anywhere}.row .iid{overflow-wrap:anywhere;min-width:0}.row.done .t{font-weight:400;color:var(--mute)}
 .row .meta{display:flex;gap:8px;align-items:center}
 .row .sub{grid-column:3/-1;color:var(--mute);font-size:12px;overflow-wrap:anywhere}
 .ico{width:16px;height:16px;margin-top:2px}
@@ -204,7 +204,7 @@ def render(d, s=None, quiet=False):
             rev = f'<code>{html.escape(i["rev"])}</code>' if i.get('rev') else ''
             sub = ' · '.join(x for x in (linkify(i['note'], d) if i.get('note') else '', links(i.get('links'))) if x)
             rows.append(f'<div class="row {html.escape(st)}" id="i{html.escape(iid)}" data-item="{html.escape(iid)}" data-f="{" ".join(f)}">'
-                        f'<svg class="ico" role="img" aria-label="{lab}"><use href="#i-{html.escape(st)}"/></svg><span class="mute">{html.escape(iid)}</span>'
+                        f'<svg class="ico" role="img" aria-label="{lab}"><use href="#i-{html.escape(st)}"/></svg><span class="mute iid">{html.escape(iid)}</span>'
                         f'<span class="t">{html.escape(i.get("title", ""))}</span><span class="meta">{rev}<span class="label l-{html.escape(st)}">{lab}</span></span>'
                         f'<button class="btn" type="button" data-comment>Comment</button>'
                         + (f'<div class="sub">{sub}</div>' if sub else '') + ''.join(comment_html(c, d) for c in cm) + '</div>')
@@ -233,7 +233,10 @@ def render(d, s=None, quiet=False):
     send_btn = (f'<p><button class="btn primary" type="button" id="send">Send {unsent} comment{"s" if unsent != 1 else ""} to Claude</button>'
                 '<span id="sendmsg" class="small" role="status"></span></p>') if unsent else ''
     title = html.escape(s.get('title', 'Tracker'))
-    body = f'''{ICONS}<main>
+    # Width of the id column: fits the longest id (up to 16ch, longer ones wrap), same on every row.
+    idlen = max((len(str(i['id'])) for i in items), default=0)
+    idw = f' style="--idw:{min(idlen, 16)}ch"' if idlen > 3 else ''
+    body = f'''{ICONS}<main{idw}>
 <header class="head"><h1>{title}</h1><nav aria-label="Related">{top}</nav>
 <p class="mute">{sub}Updated {html.escape(s.get("updated", ""))} · <span class="live">Live</span></p></header>
 <div class="prog" role="img" aria-label="{status}">{seg}</div>
