@@ -104,7 +104,7 @@ def test_feedback_cli_lists_and_resolves(board):
     assert '#1' not in cli('feedback', board).stdout
     assert '#1 [resolved]' in cli('feedback', board, '--all').stdout
     assert comments(board)[0]['reply'] == 'Done, see reports/r.md'
-    assert '↳ Done, see <a href="/md?p=reports/r.md">' in page(board)
+    assert '<b>Claude</b>Done, see <a href="/md?p=reports/r.md">' in page(board)
     assert cli('feedback', board, '--resolve', 9, check=False).returncode != 0
 
 

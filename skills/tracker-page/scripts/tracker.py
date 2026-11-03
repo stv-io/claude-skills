@@ -60,8 +60,11 @@ details.box>summary:before{content:"▸";color:var(--mute);font-size:11px;transi
 .ico{width:16px;height:16px;margin-top:2px}
 .cmt{grid-column:3/-1;margin-top:8px;border:1px solid var(--line);border-radius:6px;overflow:hidden;font-size:13px}
 .cmt .ch{background:var(--sub);padding:3px 10px;font-size:12px;color:var(--mute);border-bottom:1px solid var(--line)}
-.cmt p{margin:0;padding:6px 10px;white-space:pre-wrap}.cmt .re{border-top:1px dashed var(--line);color:var(--mute)}
-.cmt.resolved{opacity:.75}
+.cmt p{margin:0;padding:8px 10px 8px 12px;white-space:pre-wrap}
+.cmt .you{border-left:3px solid var(--acc);background:color-mix(in srgb,var(--acc) 9%,var(--bg))}
+.cmt.resolved .you{border-left-color:var(--ok);background:color-mix(in srgb,var(--ok) 7%,var(--bg))}
+.cmt .re{border-left:3px solid var(--todo);border-top:1px solid var(--line)}
+.cmt .re b{display:block;font-size:11px;font-weight:600;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}
 .compose{grid-column:3/-1;margin-top:8px}.compose .acts{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:8px}
 .compose .msg{margin-right:auto}
 aside .side{position:sticky;top:16px}
@@ -177,8 +180,8 @@ def stage(c):
 
 def comment_html(c, d):
     who = f'You commented at {html.escape(short(c.get("at", "")))} · {stage(c)}'
-    reply = f'<p class="re">↳ {linkify(c["reply"], d)}</p>' if c.get('reply') else ''
-    return f'<div class="cmt {html.escape(c.get("state", "open"))}" id="c{c["id"]}"><div class="ch">#{c["id"]} · {who}</div><p>{html.escape(c["text"])}</p>{reply}</div>'
+    reply = f'<p class="re"><b>Claude</b>{linkify(c["reply"], d)}</p>' if c.get('reply') else ''
+    return f'<div class="cmt {html.escape(c.get("state", "open"))}" id="c{c["id"]}"><div class="ch">#{c["id"]} · {who}</div><p class="you">{html.escape(c["text"])}</p>{reply}</div>'
 
 
 def render(d, s=None, quiet=False):
