@@ -14,9 +14,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false                       # one version failing shouldn't hide the others
       matrix:
-        # 3.9 is macOS's system Python; the script promises to run there.
-        python: ['3.9', '3.13']
+        # Every supported CPython. 3.9 is macOS's system Python; the script promises to run there.
+        python: ['3.9', '3.10', '3.11', '3.12', '3.13', '3.14', '3.15']
     defaults: { run: { working-directory: skills/md-toc/tests } }
     env:
       GH_TOKEN: ${{ github.token }}          # gh api /markdown for the GitHub render test
