@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""md-toc: build a linked table of contents for a Markdown file, and check that
+every in-page link (#anchor) points at something that exists.
+
+Anchors are computed the way GitHub does it (github-slugger): the heading's
+rendered text, lower-cased, with punctuation and emoji dropped, spaces turned
+into hyphens, and repeats numbered -1, -2, ... in document order. GitLab, VS
+Code's preview, Gitea and most static-site generators use the same scheme.
+
+  md-toc FILE                 write/refresh the TOC in place, then check links
+  md-toc FILE --check         only check links (exit 1 if any are broken)
+  md-toc FILE --stats         word and heading counts (to decide if a TOC is due)
+  md-toc FILE --print         print the TOC instead of writing it
+  md-toc FILE --github        also render the file with GitHub's API and confirm
+                              every anchor exists in the real output (sends the
+                              file to api.github.com; needs `gh` logged in)
+
+The TOC lives between <!-- toc --> and <!-- tocstop --> and is replaced on each
+run. Without markers, a "## Contents" section is inserted before the first H2
+that is not the TL;DR or Summary.
+"""
+import argparse
+import json
+import re
+import subprocess
+import sys
+import unicodedata
+
+START, STOP = "<!-- toc -->", "<!-- tocstop -->"
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+ATX = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
+SETEXT = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
+ANCHOR = re.compile(r'^\s*<a id="[^"]*"></a>\s*')
+FRONT_SKIP = {"tl;dr", "tldr", "summary", "contents", "table of contents"}
+
+
+# ---------------------------------------------------------------- parsing
+
+def scan(lines):
+    """Yield (index, level, raw_text) for every heading outside code fences,
+    front matter and the TOC block."""
+    fence = None
+    in_toc = False
+    i = 0
+    if lines and lines[0].strip() == "---":  # YAML front matter
+        for j in range(1, len(lines)):
+            if lines[j].strip() in ("---", "..."):
+                i = j + 1
+                break
+    while i < len(lines):
+        line = lines[i]
+        m = FENCE.match(line)
+        if fence:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                fence = None
+            i += 1
+            continue
+        if m:
+            fence = m.group(1)
+            i += 1
+            continue
+        s = line.strip()
+        if s == START:
+            in_toc = True
+        elif s == STOP:
+            in_toc = False
+        elif not in_toc:
+            h = ATX.match(line)
+            if h:
+                yield i, len(h.group(1)), (h.group(2) or "").strip()
+            elif (s and i + 1 < len(lines) and SETEXT.match(lines[i + 1])
+                  and not line.startswith(("    ", "\t"))
+                  and not re.match(r"^ {0,3}([-*+>]|\d+[.)]|\|)", line)
+                  and (i == 0 or not lines[i - 1].strip())):
+                yield i, 1 if lines[i + 1].strip()[0] == "=" else 2, s
+                i += 1
+        i += 1
+
+
+def plain(text):
+    """Approximate the rendered text of a heading (what a browser shows)."""
+    codes = []
+
+    def keep_code(m):
+        codes.append(m.group(2).strip() if m.group(2).strip() else m.group(2))
+        return f"\x00{len(codes) - 1}\x00"
+
+    t = re.sub(r"(`+)(.+?)\1", keep_code, text)
+    t = re.sub(r"<!--.*?-->", "", t)
+    t = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", t)            # images: no text
+    t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)          # [text](url)
+    t = re.sub(r"\[([^\]]*)\]\[[^\]]*\]", r"\1", t)         # [text][ref]
+    t = re.sub(r"<[A-Za-z/][^>]*>", "", t)                  # html tags
+    t = re.sub(r"\\([!-/:-@\[-`{-~])", r"\1", t)            # \escapes
+    t = re.sub(r"(\*{1,3})(?=\S)(.+?)(?<=\S)\1", r"\2", t)  # *emphasis*
+    t = re.sub(r"(?<![\w])(_{1,3})(?=\S)(.+?)(?<=\S)\1(?![\w])", r"\2", t)
+    t = re.sub(r"~~(.+?)~~", r"\1", t)
+    t = t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    t = re.sub(r"\x00(\d+)\x00", lambda m: codes[int(m.group(1))], t)
+    return t.strip()
+
+
+def slug(text):
+    """github-slugger: keep letters, marks, numbers, '_', '-' and spaces."""
+    out = []
+    for ch in text.lower():
+        cat = unicodedata.category(ch)
+        if ch in "-_" or cat[0] in "LMN":
+            out.append(ch)
+        elif ch == " ":
+            out.append("-")
+    return "".join(out)
+
+
+def headings(lines):
+    seen = {}
+    result = []
+    for i, level, raw in scan(lines):
+        raw = ANCHOR.sub("", raw)
+        text = plain(raw)
+        base = slug(text)
+        s = base
+        if s in seen:
+            n = seen[base]
+            while True:
+                n += 1
+                s = f"{base}-{n}"
+                if s not in seen:
+                    break
+            seen[base] = n
+        seen.setdefault(s, 0)
+        result.append({"line": i, "level": level, "raw": raw, "text": text, "slug": s})
+    return result
+
+
+# ---------------------------------------------------------------- TOC
+
+def link_text(raw):
+    """Heading text that is safe inside [...]: links flattened, brackets escaped."""
+    t = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", raw)
+    t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    t = re.sub(r"\[([^\]]*)\]\[[^\]]*\]", r"\1", t)
+    t = re.sub(r"(?<!\\)([\[\]])", r"\\\1", t)
+    return t.strip()
+
+
+def build_toc(hs, lo, hi, skip_lines):
+    picked = [h for h in hs if lo <= h["level"] <= hi and h["line"] not in skip_lines]
+    if not picked:
+        return []
+    top = min(h["level"] for h in picked)
+    return [f'{"  " * (h["level"] - top)}- [{link_text(h["raw"])}](#{h["slug"]})' for h in picked]
+
+
+def find_markers(lines):
+    start = stop = None
+    fence = None
+    for i, line in enumerate(lines):
+        m = FENCE.match(line)
+        if fence:
+            if m and m.group(1)[0] == fence[0]:
+                fence = None
+            continue
+        if m:
+            fence = m.group(1)
+            continue
+        if line.strip() == START and start is None:
+            start = i
+        elif line.strip() == STOP and start is not None and stop is None:
+            stop = i
+    return start, stop
+
+
+def write_toc(lines, lo, hi, title):
+    start, stop = find_markers(lines)
+    if start is None:
+        hs = headings(lines)
+        after = [h for h in hs if h["level"] == 2 and h["text"].lower().strip(" :") not in FRONT_SKIP]
+        h1 = next((h for h in hs if h["level"] == 1), None)
+        if after:
+            at = after[0]["line"]
+        elif h1:
+            at = h1["line"] + 1
+        else:
+            at = 0
+        block = [f"## {title}", "", START, STOP, ""]
+        if at > 0 and lines[at - 1].strip():
+            block.insert(0, "")
+        lines[at:at] = block
+        start, stop = find_markers(lines)
+    elif stop is None:
+        sys.exit(f"md-toc: found {START} but no {STOP}")
+    hs = headings(lines)
+    # don't list the Contents heading itself (the nearest heading above the markers)
+    above = [h for h in hs if h["line"] < start]
+    skip = {above[-1]["line"]} if above and above[-1]["text"].lower() in FRONT_SKIP else set()
+    toc = build_toc(hs, lo, hi, skip)
+    lines[start:stop + 1] = [START, ""] + toc + ["", STOP]
+    return toc
+
+
+def set_anchors(lines, lo, hi):
+    """Put <a id="slug"></a> at the start of every heading the TOC or a body
+    link points at, and remove stale ones. Viewers that don't generate heading
+    ids (mdserve, many local previewers) then still have a target to jump to.
+    GitHub keeps the tag and generates the same id, so nothing changes there."""
+    hs = headings(lines)
+    targets = {h["slug"] for h in hs if lo <= h["level"] <= hi}
+    for _, t in link_targets(lines):
+        targets.add(t)
+    for h in hs:
+        i = h["line"]
+        line = lines[i]
+        tag = f'<a id="{h["slug"]}"></a>' if h["slug"] in targets else ""
+        m = ATX.match(line)
+        if m:
+            lines[i] = f'{m.group(1)} {tag}{h["raw"]}'
+        else:  # setext: the text line itself
+            indent = line[:len(line) - len(line.lstrip())]
+            lines[i] = indent + tag + h["raw"]
+    return sum(1 for h in hs if h["slug"] in targets)
+
+
+# ---------------------------------------------------------------- checking
+
+LINK = re.compile(r"\]\(\s*<?#([^)\s>]*)>?(?:\s+\"[^\"]*\")?\s*\)")
+HREF = re.compile(r"""href\s*=\s*["']#([^"']*)["']""")
+REFDEF = re.compile(r"^ {0,3}\[[^\]]+\]:\s*<?#(\S*?)>?(?:\s|$)")
+IDS = re.compile(r"""\b(?:id|name)\s*=\s*["']([^"']+)["']""")
+
+
+def link_targets(lines, ids=None):
+    fence = None
+    refs = []
+    for i, line in enumerate(lines):
+        m = FENCE.match(line)
+        if fence:
+            if m and m.group(1)[0] == fence[0]:
+                fence = None
+            continue
+        if m:
+            fence = m.group(1)
+            continue
+        code_free = re.sub(r"(`+).+?\1", "", line)
+        if ids is not None:
+            ids.update(IDS.findall(code_free))
+        for rx in (LINK, HREF, REFDEF):
+            for target in rx.findall(code_free):
+                refs.append((i + 1, target))
+    return refs
+
+
+def check(lines, need_explicit):
+    """broken: target exists nowhere. implicit: only exists if the viewer
+    generates heading ids itself (GitHub does, mdserve doesn't)."""
+    from urllib.parse import unquote
+    hs = headings(lines)
+    slugs = {h["slug"] for h in hs}
+    explicit = set()
+    refs = link_targets(lines, explicit)
+    broken, implicit = [], []
+    for n, target in refs:
+        t = unquote(target)
+        if not t:
+            continue
+        if t in explicit:
+            continue
+        if t in slugs or t.lower() in slugs:
+            if need_explicit:
+                implicit.append((n, target))
+            continue
+        close = [h["slug"] for h in hs if t.lower().replace("-", "") == h["slug"].replace("-", "")]
+        broken.append((n, target, close[0] if close else None))
+    return hs, refs, broken, implicit
+
+
+def github_check(text, hs):
+    """Render with GitHub and return the set of anchors it actually produced."""
+    # "markdown" mode is the one that emits heading anchors ("gfm" mode doesn't).
+    # Front matter is blanked out: github.com shows it as a table, not a heading.
+    m = re.match(r"---\n.*?\n(?:---|\.\.\.)\n", text, re.S)
+    if m:
+        text = "\n" * m.group(0).count("\n") + text[m.end():]
+    p = subprocess.run(["gh", "api", "-X", "POST", "/markdown", "--input", "-"],
+                       input=json.dumps({"text": text, "mode": "markdown"}),
+                       capture_output=True, text=True)
+    if p.returncode:
+        sys.exit(f"md-toc: GitHub render failed: {p.stderr.strip()}")
+    return set(re.findall(r'id="user-content-([^"]+)"', p.stdout))
+
+
+# ---------------------------------------------------------------- main
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("file")
+    ap.add_argument("--check", action="store_true", help="only check in-page links")
+    ap.add_argument("--print", action="store_true", help="print the TOC, don't write")
+    ap.add_argument("--stats", action="store_true", help="word/heading counts")
+    ap.add_argument("--github", action="store_true", help="verify anchors against GitHub's renderer")
+    ap.add_argument("--no-anchors", action="store_true",
+                    help="don't write <a id> tags into headings (links then rely on the viewer)")
+    ap.add_argument("--min-level", type=int, default=2)
+    ap.add_argument("--max-level", type=int, default=3)
+    ap.add_argument("--title", default="Contents")
+    a = ap.parse_args()
+
+    with open(a.file, encoding="utf-8") as f:
+        original = f.read()
+    lines = original.split("\n")
+
+    if a.stats:
+        hs = headings(lines)
+        words = len(re.findall(r"\w+", re.sub(r"```.*?```", "", original, flags=re.S)))
+        counts = {lvl: sum(1 for h in hs if h["level"] == lvl) for lvl in range(1, 7)}
+        print(json.dumps({"words": words, "headings": counts,
+                          "has_toc": START in original}, indent=None))
+        return
+
+    if a.print:
+        hs = headings(lines)
+        for row in build_toc(hs, a.min_level, a.max_level, set()):
+            print(row)
+        return
+
+    if not a.check:
+        toc = write_toc(lines, a.min_level, a.max_level, a.title)
+        if not a.no_anchors:
+            set_anchors(lines, a.min_level, a.max_level)
+        new = "\n".join(lines)
+        if new != original:
+            with open(a.file, "w", encoding="utf-8") as f:
+                f.write(new)
+        print(f"md-toc: {len(toc)} entries {'written' if new != original else 'unchanged'} in {a.file}",
+              file=sys.stderr)
+        original = new
+
+    hs, refs, broken, implicit = check(lines, not a.no_anchors)
+    for n, target, hint in broken:
+        print(f"{a.file}:{n}: broken anchor #{target}" + (f" (did you mean #{hint}?)" if hint else ""))
+    for n, target in implicit:
+        print(f"{a.file}:{n}: #{target} has no <a id> in the file; works on GitHub, "
+              f"not in viewers like mdserve (run md-toc without --check to add it)")
+
+    gh_missing = []
+    if a.github:
+        real = github_check(original, hs)
+        gh_missing = sorted({t for _, t in refs if t and t not in real})
+        mismatch = [h for h in hs if h["slug"] not in real]
+        for t in gh_missing:
+            print(f"{a.file}: GitHub produced no anchor for #{t}")
+        for h in mismatch:
+            print(f"{a.file}:{h['line'] + 1}: computed #{h['slug']} but GitHub differs for '{h['raw']}'")
+        gh_missing += [h["slug"] for h in mismatch]
+
+    ok = not broken and not implicit and not gh_missing
+    print(f"md-toc: {len(refs)} in-page links, {len(broken)} broken, {len(implicit)} without explicit anchor"
+          + (f"; GitHub render {'agrees' if not gh_missing else 'DISAGREES'}" if a.github else ""),
+          file=sys.stderr)
+    sys.exit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    main()

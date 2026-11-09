@@ -1,0 +1,35 @@
+name: md-toc
+
+on:
+  pull_request:
+    paths: ['skills/md-toc/**', '.github/workflows/md-toc.yml']
+  push:
+    branches: [main]
+    paths: ['skills/md-toc/**', '.github/workflows/md-toc.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 3.9 is macOS's system Python; the script promises to run there.
+        python: ['3.9', '3.13']
+    defaults: { run: { working-directory: skills/md-toc/tests } }
+    env:
+      GH_TOKEN: ${{ github.token }}          # gh api /markdown for the GitHub render test
+      MD_TOC_REQUIRE_RENDERERS: '1'          # a missing renderer fails, never skips
+      MDSERVE_VERSION: v1.1.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install mdserve (a viewer that makes no heading ids)
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          gh release download "$MDSERVE_VERSION" -R jfernandez/mdserve \
+            -p mdserve-x86_64-unknown-linux-musl -O "$RUNNER_TEMP/bin/mdserve"
+          chmod +x "$RUNNER_TEMP/bin/mdserve"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - run: uv run --no-project --python ${{ matrix.python }} --with pytest --with markdown pytest -q -rs
