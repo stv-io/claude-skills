@@ -2,7 +2,7 @@
 
 [![skills.sh](https://skills.sh/b/stv-io/claude-skills)](https://skills.sh/stv-io/claude-skills)
 
-Six Claude Code skills I use every day: a live status page for long agent runs, a house style for diagrams, and the chores around them. MIT licensed.
+Seven Claude Code skills I use every day: a live status page for long agent runs, a house style for diagrams, and the chores around them. MIT licensed.
 
 ## Skills
 
@@ -13,9 +13,10 @@ Six Claude Code skills I use every day: a live status page for long agent runs, 
 | [session-export](skills/session-export) | Share a Claude Code session as clean Markdown, not a terminal dump. Credential masking is best-effort. | any | Python 3 | reads your session transcripts; writes the file you name |
 | [claude-usage](skills/claude-usage) | Claude checks your 5-hour and weekly plan usage before starting something expensive. **Needs a one-line status-line hook.** | macOS, Linux | bash, jq 1.6+ | writes `~/.claude/usage-cache.json` |
 | [diagram-style](skills/diagram-style) | Diagrams Claude draws look like one consistent set instead of a different sketch each time: colour by role, one font, title as the conclusion. | any | Python 3; an [Excalidraw canvas](https://github.com/yctimlin/mcp_excalidraw) to draw on | writes the figures you ask for |
+| [md-toc](skills/md-toc) | Long Markdown documents get a TL;DR, a summary and a table of contents whose links work, on GitHub and in viewers that don't make heading ids (mdserve). Every in-page link is checked. | any | Python 3; `gh` for the optional GitHub check | rewrites the Markdown file you point it at |
 | [browser-select](skills/browser-select) | With several browsers connected to Claude in Chrome, Claude asks which one instead of acting in the wrong account. | any | [Claude in Chrome](https://claude.com/chrome) in 2+ browsers, Python 3 | writes `~/.claude/browsers.json` |
 
-None of them use the network themselves.
+None of them use the network themselves, except md-toc's opt-in `--github` check, which sends the file to GitHub's Markdown API.
 
 ## Install (30 seconds)
 
@@ -79,13 +80,17 @@ One house style for architecture diagrams on an Excalidraw canvas: colour by rol
 
 Gives each connected browser a name you choose (`work-chrome`, `personal-dia`), makes Claude ask which one to use when you haven't said, and keeps your answer for the session. [Read more →](skills/browser-select)
 
+### md-toc
+
+Claude writes a one-line TL;DR and a short summary. A script builds the table of contents from the headings, writes the matching anchor into each heading so links work even where the viewer makes no heading ids, and checks every `#link` in the file with `file:line` for each broken one. Tests run the output through mdserve, Python-Markdown and GitHub's renderer. [Read more →](skills/md-toc)
+
 ## Hacking on these
 
 To edit the skills and have changes take effect immediately, clone the repo and symlink the folders instead of installing copies:
 
 ```bash
 git clone https://github.com/stv-io/claude-skills.git ~/code/claude-skills
-for s in tracker-page browser-select claude-usage session-export mac-disk-cleanup diagram-style; do
+for s in tracker-page browser-select claude-usage session-export mac-disk-cleanup diagram-style md-toc; do
   ln -s ~/code/claude-skills/skills/$s ~/.claude/skills/$s
 done
 # Optional: put the CLIs on your PATH
@@ -93,11 +98,12 @@ ln -s ~/code/claude-skills/skills/browser-select/bin/browsers           ~/.local
 ln -s ~/code/claude-skills/skills/claude-usage/bin/claude-usage         ~/.local/bin/claude-usage
 ln -s ~/code/claude-skills/skills/claude-usage/bin/claude-usage-capture ~/.local/bin/claude-usage-capture
 ln -s ~/code/claude-skills/skills/session-export/bin/session-export     ~/.local/bin/session-export
+ln -s ~/code/claude-skills/skills/md-toc/bin/md-toc                     ~/.local/bin/md-toc
 ```
 
 Don't run `npx skills add` over these symlinks: it replaces them with copies without asking.
 
-tracker-page has tests (`uv` is all you need); see [its SKILL.md](skills/tracker-page/SKILL.md#changing-the-scripts).
+tracker-page and md-toc have tests (`uv` is all you need); see [tracker-page's SKILL.md](skills/tracker-page/SKILL.md#changing-the-scripts) and [md-toc's README](skills/md-toc/README.md#tests).
 
 ## License
 
