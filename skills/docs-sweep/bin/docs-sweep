@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""docs-sweep: mechanical checks that keep docs in step with a change.
+
+  docs-sweep terms [BASE]   values the change removed or replaced that the repo still mentions
+  docs-sweep paths          file paths named in Markdown that do not exist
+  docs-sweep links          relative Markdown links and #anchors that do not resolve
+  docs-sweep all [BASE]     the three above
+
+BASE defaults to origin/HEAD, then origin/main, origin/master. `terms` compares the merge base with
+the working tree, so uncommitted edits count. Untracked files that are not ignored are checked too.
+Read-only. Run from inside the repo.
+
+Exit code 1 when anything is reported, 2 when git fails (a bad BASE, not a repo). Exit 1 is a
+prompt to look, not a hard gate: a hit is a place to look, not proof of an error, and history
+pages legitimately name files that are gone.
+"""
+import os
+import re
+import subprocess
+import sys
+
+TEXT_EXT = (".md", ".hcl", ".tf", ".tfvars", ".yaml", ".yml", ".gotmpl", ".tpl", ".sh", ".py",
+            ".toml", ".json", ".sql", ".xml", ".txt", ".cfg", ".ini", ".alloy", "Makefile",
+            "Dockerfile", "CODEOWNERS")
+MAX_HITS = 25      # a term found in more places than this is too common to be useful
+MAX_TERMS = 400
+
+
+def git(*args, ok=(0,)):
+    """Run git; stop with its error unless the exit code is one the caller expects.
+
+    Swallowing errors would turn a bad BASE into a clean report.
+    """
+    r = subprocess.run(["git", *args], capture_output=True, text=True)
+    if r.returncode not in ok:
+        sys.stderr.write(r.stderr)
+        sys.stderr.write(f"docs-sweep: git {' '.join(args)} failed (exit {r.returncode})\n")
+        sys.exit(2)
+    return r.stdout
+
+
+def root():
+    r = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if r.returncode or not r.stdout.strip():
+        sys.stderr.write("docs-sweep: not inside a git repository\n")
+        sys.exit(2)
+    os.chdir(r.stdout.strip())
+
+
+def tracked():
+    """Files in the repo as it stands: committed, staged, and new files that are not ignored."""
+    out = git("ls-files", "--cached", "--others", "--exclude-standard")
+    return sorted({f for f in out.splitlines() if os.path.isfile(f)})
+
+
+def base_ref(arg):
+    if arg:
+        return arg
+    for ref in ("origin/HEAD", "origin/main", "origin/master", "main", "master"):
+        if git("rev-parse", "--verify", "--quiet", ref, ok=(0, 1)).strip():
+            return ref
+    sys.stderr.write("docs-sweep: no base ref found; pass one (docs-sweep terms <base>)\n")
+    sys.exit(2)
+
+
+# --- terms: what the change removed or replaced, still mentioned elsewhere -----------------------
+
+TOKEN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./:@-]{2,}[A-Za-z0-9_]")
+
+
+def interesting(tok):
+    """Names and values, not prose: has a digit or a separator, or looks like an identifier."""
+    if len(tok) < 4 or tok.startswith(("http://", "https://")):
+        return False
+    if not re.search(r"[A-Za-z]", tok) and not re.fullmatch(r"\d+(\.\d+)+", tok):
+        return False  # a bare number is noise; a version (1.2.3) is not
+    return bool(re.search(r"\d", tok) or re.search(r"[_./:@-]", tok) or re.search(r"[a-z][A-Z]", tok))
+
+
+def terms(base):
+    git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}")   # stops on a bad BASE
+    since = git("merge-base", base, "HEAD").strip()
+    # Merge base against the working tree: committed, staged and unstaged edits all count.
+    diff = git("diff", "--unified=0", "--find-renames", since)
+    removed, added, changed_files = set(), [], set()
+    in_hunk = False
+    for line in diff.splitlines():
+        # File headers come before a file's first @@; inside a hunk, "---" is a removed "--" line
+        # (an SQL comment, a Markdown rule), not a header.
+        if line.startswith("diff --git "):
+            in_hunk = False
+        elif line.startswith("@@"):
+            in_hunk = True
+        elif not in_hunk:
+            continue
+        elif line.startswith("-"):
+            removed.update(t for t in TOKEN.findall(line[1:]) if interesting(t))
+        elif line.startswith("+"):
+            added.append(line[1:])
+    # Deleted and renamed paths are terms too: docs name files.
+    for line in git("diff", "--name-status", "--find-renames", since).splitlines():
+        parts = line.split("\t")
+        changed_files.update(parts[1:])
+        if parts[0].startswith(("D", "R")):
+            removed.add(parts[1])
+            removed.add(os.path.basename(parts[1]))
+    added_text = "\n".join(added)   # a value that only moved or was rewrapped is still there
+    gone = sorted(t for t in removed if t not in added_text)[:MAX_TERMS]
+    found = 0
+    for term in gone:
+        hits = [h for h in git("grep", "--untracked", "-n", "-I", "-F", "-e", term, ok=(0, 1)).splitlines()
+                if h.split(":", 1)[0].endswith(TEXT_EXT)]
+        if not hits or len(hits) > MAX_HITS:
+            continue
+        found += 1
+        print(f"\n{term}   (removed or replaced by this change; still in {len(hits)} place(s))")
+        for h in hits:
+            f, n, text = h.split(":", 2)
+            mark = "" if f in changed_files else "  <- file not touched by the change"
+            print(f"  {f}:{n}: {text.strip()[:110]}{mark}")
+    print(f"\nterms: {found} removed value(s) still mentioned ({len(gone)} checked, base {base})")
+    return found
+
+
+# --- paths: files named in Markdown that are not there -------------------------------------------
+
+PATHISH = re.compile(r"`([A-Za-z0-9_.][A-Za-z0-9_./-]*\.[A-Za-z0-9]{1,8}|[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+)`")
+
+
+def paths():
+    files = tracked()
+    top = {f.split("/", 1)[0] for f in files if "/" in f}   # the repo's own top-level folders
+    names = set(files) | {os.path.dirname(f) for f in files}
+    dirs = set()
+    for f in files:
+        d = os.path.dirname(f)
+        while d:
+            dirs.add(d)
+            d = os.path.dirname(d)
+    found = 0
+    for md in (f for f in files if f.endswith(".md")):
+        here = os.path.dirname(md)
+        for n, line in enumerate(open(md, encoding="utf-8", errors="replace"), 1):
+            for m in PATHISH.finditer(line):
+                p = m.group(1).rstrip("/")
+                if any(c in p for c in "<>*{}$") or p.startswith(("http", "~", "/", "-")) or ".." in p:
+                    continue
+                if "/" not in p:
+                    # A bare name (`LOG.md`) is as often an example as a repo file, and a deleted or
+                    # renamed file's bare name is already a `terms` hit. Only report a/b paths.
+                    continue
+                if p.split("/", 1)[0] not in top and not re.search(r"\.(sh|py|hcl|md|tf|ya?ml|toml|json|sql|xml|gotmpl|tpl)$", p):
+                    continue  # a/b that is not under a repo folder and has no file extension: not a path
+                cands = {p, os.path.normpath(os.path.join(here, p))}
+                if cands & names or cands & dirs or any(os.path.exists(c) for c in cands):
+                    continue
+                if any(f.endswith("/" + p) or f.startswith(p + "/") for f in files):
+                    continue  # a path given relative to some other folder
+                found += 1
+                print(f"  {md}:{n}: `{p}` does not exist")
+    print(f"paths: {found} path(s) named in Markdown that are not in the repo")
+    return found
+
+
+# --- links: relative links and anchors -----------------------------------------------------------
+
+LINK = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+
+
+def slugs(path):
+    """Heading anchors as GitHub and GitLab make them (both forms are accepted)."""
+    out, seen, fence = set(), {}, False
+    for line in open(path, encoding="utf-8", errors="replace"):
+        if line.lstrip().startswith(("```", "~~~")):
+            fence = not fence
+        m = None if fence else HEADING.match(line)
+        if not m:
+            continue
+        text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", m.group(2))   # link text only
+        text = re.sub(r"[`*_]", "", text) if "_" not in text else re.sub(r"[`*]", "", text)
+        s = re.sub(r"[^\w\- ]", "", text.strip().lower(), flags=re.UNICODE).replace(" ", "-")
+        for v in {s, re.sub(r"-{2,}", "-", s)}:
+            k = seen.get(v, 0)
+            out.add(v if k == 0 else f"{v}-{k}")
+            seen[v] = k + 1
+        for a in re.findall(r"<a\s+(?:id|name)=\"([^\"]+)\"", line):
+            out.add(a)
+    return out
+
+
+def links():
+    found, cache = 0, {}
+    for md in (f for f in tracked() if f.endswith(".md")):
+        fence = False
+        for n, line in enumerate(open(md, encoding="utf-8", errors="replace"), 1):
+            if line.lstrip().startswith(("```", "~~~")):
+                fence = not fence
+            if fence:
+                continue
+            for target in LINK.findall(re.sub(r"`[^`]*`", "", line)):
+                if re.match(r"[a-z][a-z0-9+.-]*:", target) or target.startswith("//"):
+                    continue
+                path, _, anchor = target.partition("#")
+                dest = os.path.normpath(os.path.join(os.path.dirname(md), path)) if path else md
+                if not os.path.exists(dest):
+                    found += 1
+                    print(f"  {md}:{n}: link to {target}: no such file")
+                elif anchor and dest.endswith(".md"):
+                    if dest not in cache:
+                        cache[dest] = slugs(dest)
+                    if anchor.lower() not in cache[dest]:
+                        found += 1
+                        print(f"  {md}:{n}: link to {target}: no heading #{anchor} in {dest}")
+    print(f"links: {found} broken relative link(s) or anchor(s)")
+    return found
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "all"
+    arg = sys.argv[2] if len(sys.argv) > 2 else None
+    if cmd in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    root()
+    if cmd == "terms":
+        n = terms(base_ref(arg))
+    elif cmd == "paths":
+        n = paths()
+    elif cmd == "links":
+        n = links()
+    elif cmd == "all":
+        n = terms(base_ref(arg)) + paths() + links()
+    else:
+        sys.stderr.write(__doc__)
+        return 2
+    return 1 if n else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
