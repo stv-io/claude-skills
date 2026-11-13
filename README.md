@@ -2,7 +2,7 @@
 
 [![skills.sh](https://skills.sh/b/stv-io/claude-skills)](https://skills.sh/stv-io/claude-skills)
 
-Seven Claude Code skills I use every day: a live status page for long agent runs, a house style for diagrams, and the chores around them. MIT licensed.
+Eight Claude Code skills I use every day: a live status page for long agent runs, a house style for diagrams, and the chores around them. MIT licensed.
 
 ## Skills
 
@@ -14,6 +14,7 @@ Seven Claude Code skills I use every day: a live status page for long agent runs
 | [claude-usage](skills/claude-usage) | Claude checks your 5-hour and weekly plan usage before starting something expensive. **Needs a one-line status-line hook.** | macOS, Linux | bash, jq 1.6+ | writes `~/.claude/usage-cache.json` |
 | [diagram-style](skills/diagram-style) | Diagrams Claude draws look like one consistent set instead of a different sketch each time: colour by role, one font, title as the conclusion. | any | Python 3; an [Excalidraw canvas](https://github.com/yctimlin/mcp_excalidraw) to draw on | writes the figures you ask for |
 | [md-toc](skills/md-toc) | Long Markdown documents get a TL;DR, a summary and a table of contents whose links work, on GitHub and in viewers that don't make heading ids (mdserve). Every in-page link is checked. | any | Python 3; `gh` for the optional GitHub check | rewrites the Markdown file you point it at |
+| [docs-sweep](skills/docs-sweep) | Before a change becomes a PR, Claude sweeps the whole repo's docs for everything the change made stale, not only the lines the diff touched. A script finds removed values still mentioned, paths that no longer exist, broken links, and counts or versions in prose that disagree with the repo. | any | Python 3, git | nothing by itself; Claude edits the docs it finds stale |
 | [browser-select](skills/browser-select) | With several browsers connected to Claude in Chrome, Claude asks which one instead of acting in the wrong account. | any | [Claude in Chrome](https://claude.com/chrome) in 2+ browsers, Python 3 | writes `~/.claude/browsers.json` |
 
 None of them use the network themselves, except md-toc's opt-in `--github` check, which sends the file to GitHub's Markdown API.
@@ -84,13 +85,17 @@ Gives each connected browser a name you choose (`work-chrome`, `personal-dia`), 
 
 Claude writes a one-line TL;DR and a short summary. A script builds the table of contents from the headings, writes the matching anchor into each heading so links work even where the viewer makes no heading ids, and checks every `#link` in the file with `file:line` for each broken one. Tests run the output through mdserve, Python-Markdown and GitHub's renderer. [Read more →](skills/md-toc)
 
+### docs-sweep
+
+Before a branch becomes a PR, Claude lists what the change changed (names, numbers, behaviour, what exists, what is built) and sweeps the whole repo for docs it made untrue: README status lines, layout trees, counts in prose, "not built yet" lists, comments elsewhere that say "keep in step with". A script finds removed values the repo still mentions, Markdown paths that don't exist, broken links, and counts or versions in prose that disagree with the repo (`seven skills` when there are eight, `Terraform 1.9` when it pins 1.12); Claude judges each hit, fixes the stale ones with the smallest edit, leaves history pages alone and reports what it found that the change didn't cause. [Read more →](skills/docs-sweep)
+
 ## Hacking on these
 
 To edit the skills and have changes take effect immediately, clone the repo and symlink the folders instead of installing copies:
 
 ```bash
 git clone https://github.com/stv-io/claude-skills.git ~/code/claude-skills
-for s in tracker-page browser-select claude-usage session-export mac-disk-cleanup diagram-style md-toc; do
+for s in tracker-page browser-select claude-usage session-export mac-disk-cleanup diagram-style md-toc docs-sweep; do
   ln -s ~/code/claude-skills/skills/$s ~/.claude/skills/$s
 done
 # Optional: put the CLIs on your PATH
@@ -99,11 +104,12 @@ ln -s ~/code/claude-skills/skills/claude-usage/bin/claude-usage         ~/.local
 ln -s ~/code/claude-skills/skills/claude-usage/bin/claude-usage-capture ~/.local/bin/claude-usage-capture
 ln -s ~/code/claude-skills/skills/session-export/bin/session-export     ~/.local/bin/session-export
 ln -s ~/code/claude-skills/skills/md-toc/bin/md-toc                     ~/.local/bin/md-toc
+ln -s ~/code/claude-skills/skills/docs-sweep/bin/docs-sweep             ~/.local/bin/docs-sweep
 ```
 
 Don't run `npx skills add` over these symlinks: it replaces them with copies without asking.
 
-tracker-page and md-toc have tests (`uv` is all you need); see [tracker-page's SKILL.md](skills/tracker-page/SKILL.md#changing-the-scripts) and [md-toc's README](skills/md-toc/README.md#tests).
+tracker-page, md-toc and docs-sweep have tests (`uv` is all you need); see [tracker-page's SKILL.md](skills/tracker-page/SKILL.md#changing-the-scripts), [md-toc's README](skills/md-toc/README.md#tests) and [docs-sweep's README](skills/docs-sweep/README.md#tests).
 
 ## License
 
