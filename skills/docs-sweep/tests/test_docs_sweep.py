@@ -131,3 +131,72 @@ def test_anchors(repo, heading, anchor):
     (repo / "doc.md").write_text(f"## FAQ\n\n## {heading}\n\n[x](#{anchor}) [y](#missing)\n")
     _, out, _ = sweep(repo, "links")
     assert f"#{anchor}:" not in out and "no heading #missing" in out
+
+
+# --- claims -------------------------------------------------------------------------------------
+
+def write(repo, files):
+    for name, text in files.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text)
+
+
+def test_count_of_folders(repo):
+    write(repo, {f"modules/m{i}/main.tf": "" for i in range(3)})
+    write(repo, {"docs/a.md": "We have three modules.\n",
+                 "docs/b.md": "Seven Terraform modules live here.\n",
+                 "docs/c.md": "One of the modules is new. Two new modules landed.\n",
+                 "CHANGELOG.md": "Added two modules.\n"})
+    code, out, _ = sweep(repo, "claims")
+    assert "docs/b.md:1: says Seven modules; modules/ has 3" in out
+    assert "a.md" not in out and "c.md" not in out and "CHANGELOG" not in out
+    assert code == 1
+
+
+PINS = {
+    "versions.tf": 'terraform {\n  required_version = ">= 1.9.0"\n}\n',
+    "eks.tf": 'module "eks" {\n  source  = "terraform-aws-modules/eks/aws"\n  version = "~> 20.8"\n}\n',
+    "argocd/app.yaml": "spec:\n  source:\n    chart: generic-deployment\n    targetRevision: 0.6.0\n",
+    "chart/Chart.yaml": "dependencies:\n  - name: redis\n    version: 19.0.1\n"
+                        "    repository: https://charts.bitnami.com/bitnami\n",
+    ".github/workflows/ci.yml": "jobs:\n  t:\n    steps:\n      - uses: actions/checkout@v4\n",
+    "deploy.yaml": "containers:\n  - image: ghcr.io/acme/api:1.4.2\n",
+    ".tool-versions": "helm 3.15.2\n",
+}
+
+
+@pytest.mark.parametrize("prose, stale", [
+    ("Requires Terraform 1.9 or later.", False),
+    ("Requires Terraform 1.8.", True),
+    ("The eks module is on 20.x.", False),
+    ("The eks module is on 19.21.", True),
+    ("generic-deployment 0.6.0 is live.", False),
+    ("generic-deployment v0.5.3 is live.", True),
+    ("redis 19.0.1, bitnami.", False),
+    ("redis 18.2 is used.", True),
+    ("We use checkout v3.", True),
+    ("We use checkout v4.", False),
+    ("api 1.4.2 is deployed.", False),
+    ("api:1.3.0 is deployed.", True),
+    ("Install helm 3.15.", False),
+    ("Install helm 3.14.", True),
+])
+def test_versions_in_prose(repo, prose, stale):
+    write(repo, {**PINS, "README.md": prose + "\n"})
+    _, out, _ = sweep(repo, "claims")
+    assert ("README.md:1:" in out) == stale, out
+
+
+def test_name_followed_by_extension_is_not_a_claim(repo):
+    write(repo, {"root.hcl": 'terragrunt_version_constraint = "= 1.1.5"\n',
+                 "README.md": "Resolved version from terragrunt.hcl : >= 1.8.0\n"})
+    code, out, _ = sweep(repo, "claims")
+    assert code == 0, out
+
+
+def test_module_readme_answers_to_its_own_pins(repo):
+    write(repo, {"a/versions.tf": 'terraform {\n  required_version = ">= 1.5"\n}\n',
+                 "b/versions.tf": 'terraform {\n  required_version = ">= 1.11"\n}\n',
+                 "b/README.md": "| terraform | >= 1.5 |\n"})
+    _, out, _ = sweep(repo, "claims")
+    assert "b/README.md:1: says terraform 1.5; pinned 1.11 (b/versions.tf:2)" in out

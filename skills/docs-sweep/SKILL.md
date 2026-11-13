@@ -13,10 +13,11 @@ built yet" that is now built, the comment in another file that says "keep in ste
 The script finds candidates. You judge them. A hit is a place to look, not proof of an error.
 
 ```bash
-docs-sweep all [BASE]     # the three checks below; BASE defaults to the remote's default branch
+docs-sweep all [BASE]     # the four checks below; BASE defaults to the remote's default branch
 docs-sweep terms [BASE]   # values the change removed or replaced that the repo still mentions
 docs-sweep paths          # a/b file paths named in Markdown that are not in the repo
 docs-sweep links          # relative Markdown links and #anchors that do not resolve
+docs-sweep claims         # counts and versions in Markdown that disagree with the repo
 ```
 
 It is `bin/docs-sweep` in this skill's folder (Python 3.9+, standard library, read-only). Run it
@@ -96,6 +97,7 @@ exits 2, git failed (usually a BASE that does not exist): fix the BASE, do not r
 | `terms` | Names and values on removed lines of the diff that no added line contains, and deleted or renamed paths, wherever the repo still mentions them | Facts the diff does not spell out (behaviour, order, counts), synonyms, values that changed meaning but not text |
 | `paths` | Backticked `a/b` file paths in Markdown that do not exist in the repo | Bare file names (`LOG.md` is as often an example; a deleted or renamed file's name is a `terms` hit); paths outside backticks; paths in another repo (reported, judge them); generated files |
 | `links` | Relative links to missing files and `#anchors` with no matching heading (GitHub and GitLab anchor forms) | External URLs; anchors made by a site generator |
+| `claims` | "N &lt;folder name&gt;" where the folder holds a different number of sub-folders (`seven skills` when `skills/` has 8); a pinned name followed by a version that disagrees with the pin (`Terraform 1.9` against `required_version = "1.12.6"`). Pins come from Terraform/Terragrunt version constraints, module `source` + `version`, Helm `chart`/`name` + `version`/`targetRevision`, image tags, `uses: x@v4`, `.tool-versions` and `.terraform-version`. A module's README is compared with its own folder's pins when it has any. Changelogs are skipped | Counts of things that are not folders ("five tests"); subsets (`two skills need setup` is reported; judge it); versions of things nothing pins; versions further than a few words from the name |
 
 Exit code is 1 when anything is reported and 2 when git fails. Exit 1 is meant for a person or a model to read, not as a
 hard gate: history pages legitimately name files that are gone.

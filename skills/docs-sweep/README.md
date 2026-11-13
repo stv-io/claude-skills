@@ -8,10 +8,11 @@ Claude first lists what the change changes, as facts (old value, new value). A s
 - **Touches:** the script only reads. Claude edits the docs it finds stale, in the branch under review.
 
 ```bash
-bin/docs-sweep all [BASE]     # all three checks; BASE defaults to origin/HEAD
+bin/docs-sweep all [BASE]     # all four checks; BASE defaults to origin/HEAD
 bin/docs-sweep terms [BASE]   # values the change removed that the repo still mentions
 bin/docs-sweep paths          # `a/b` paths named in Markdown that don't exist
 bin/docs-sweep links          # relative links and #anchors that don't resolve
+bin/docs-sweep claims         # counts and versions in prose that disagree with the repo
 ```
 
 `terms` compares the merge base with the working tree, so uncommitted edits count, and new files that aren't ignored are checked too. Exit code 1 means something to look at, 2 means git failed (a bad BASE, or not a repo).

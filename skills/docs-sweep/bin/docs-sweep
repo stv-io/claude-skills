@@ -4,7 +4,8 @@
   docs-sweep terms [BASE]   values the change removed or replaced that the repo still mentions
   docs-sweep paths          file paths named in Markdown that do not exist
   docs-sweep links          relative Markdown links and #anchors that do not resolve
-  docs-sweep all [BASE]     the three above
+  docs-sweep claims         counts and versions in Markdown that disagree with the repo
+  docs-sweep all [BASE]     the four above
 
 BASE defaults to origin/HEAD, then origin/main, origin/master. `terms` compares the merge base with
 the working tree, so uncommitted edits count. Untracked files that are not ignored are checked too.
@@ -216,6 +217,162 @@ def links():
     return found
 
 
+# --- claims: counts and versions in prose against the repo ---------------------------------------
+
+NUMBER_WORDS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
+    "fifteen sixteen seventeen eighteen nineteen twenty".split())}
+COUNT = re.compile(r"(?<![\w.$-])(\d{1,3}|" + "|".join(NUMBER_WORDS) + r")(?![\w.%-])((?:\s+[A-Za-z][\w-]*){1,4})",
+                   re.IGNORECASE)
+# Words that end a count claim: "one of the skills" and "two new skills" are not totals.
+NOT_A_TOTAL = {"of", "in", "on", "from", "to", "for", "with", "and", "or", "per", "than", "at", "by",
+               "new", "more", "other", "extra", "additional", "remaining", "existing", "old", "older",
+               "removed", "deleted", "changed", "out", "were", "are", "is", "was",
+               "separate", "different", "such", "possible", "similar", "same"}
+HISTORY = re.compile(r"(^|/)(CHANGELOG|CHANGES|HISTORY|RELEASE[-_]?NOTES)[^/]*$", re.IGNORECASE)
+
+
+def children(d):
+    """How many things a folder holds: its sub-folders if it has any, else its files."""
+    entries = [e for e in os.listdir(d) if not e.startswith((".", "_"))]
+    sub = [e for e in entries if os.path.isdir(os.path.join(d, e))]
+    return len(sub) if sub else len(entries)
+
+
+VERSION = r"v?\d+(?:\.(?:\d+|x|\*))+|v\d+"
+PIN_PATTERNS = [
+    # Terraform/OpenTofu/Terragrunt: required_version, *_version_constraint
+    (re.compile(r'^\s*required_version\s*=\s*"([^"]+)"'), "terraform"),
+    (re.compile(r'^\s*terraform_version_constraint\s*=\s*"([^"]+)"'), "terraform"),
+    (re.compile(r'^\s*terragrunt_version_constraint\s*=\s*"([^"]+)"'), "terragrunt"),
+    # GitHub Actions and other name@version references
+    (re.compile(r'uses:\s*[\w.-]+/([\w.-]+)(?:/[\w./-]+)?@(v?[\d.]+)\b'), None),
+    # Container images: image: repo/name:tag, FROM name:tag
+    (re.compile(r'(?:image:\s*|^FROM\s+)["\']?(?:[\w.-]+(?::\d+)?/)*([\w.-]+):(v?\d[\w.-]*)'), None),
+]
+NAME_KEYS = re.compile(r'^(\s*)-?\s*(chart|name|repository|source)\s*[:=]\s*["\']?([^"\'\s#]+)')
+VERSION_KEYS = re.compile(r'^(\s*)-?\s*(version|targetRevision|tag)\s*[:=]\s*["\']?([^"\'#\n]+)')
+
+
+def plain_version(v):
+    """'~> 5.0' -> '5.0', 'v1.2.3' -> '1.2.3', '>= 1.5, < 2' -> '1.5'; None if it is not a version."""
+    m = re.search(r"\d+(?:\.(?:\d+|x|\*))*", v.split(",")[0])
+    return m.group(0) if m else None
+
+
+def same_version(a, b):
+    """Equal as far as both go: '1.9' and '1.9.5' agree, '5.x' and '5.2' agree, '1.8' and '1.9' do not."""
+    for x, y in zip(a.split("."), b.split(".")):
+        if x != y and "x" not in (x, y) and "*" not in (x, y):
+            return False
+    return True
+
+
+def pins(files):
+    """(name, version, file, line) for versions pinned in code and config."""
+    out = []
+    for f in files:
+        base = os.path.basename(f)
+        if base in (".terraform-version", ".opentofu-version", ".python-version", ".nvmrc"):
+            name = {".nvmrc": "node", ".python-version": "python", ".opentofu-version": "opentofu"}.get(base, "terraform")
+            v = plain_version(open(f, encoding="utf-8", errors="replace").read().strip() or "")
+            if v:
+                out.append((name, v, f, 1))
+            continue
+        if base == ".tool-versions":
+            for n, line in enumerate(open(f, encoding="utf-8", errors="replace"), 1):
+                parts = line.split()
+                if len(parts) >= 2 and plain_version(parts[1]):
+                    out.append((parts[0], plain_version(parts[1]), f, n))
+            continue
+        if not f.endswith((".tf", ".hcl", ".yaml", ".yml", "Dockerfile")):
+            continue
+        lines = open(f, encoding="utf-8", errors="replace").read().splitlines()
+        for n, line in enumerate(lines, 1):
+            for rx, fixed in PIN_PATTERNS:
+                m = rx.search(line)
+                if m:
+                    name, ver = (fixed, m.group(1)) if fixed else (m.group(1), m.group(2))
+                    if plain_version(ver):
+                        out.append((name, plain_version(ver), f, n))
+            m = VERSION_KEYS.match(line)
+            if not m or not plain_version(m.group(3)) or "required_version" in line:
+                continue
+            # The thing this version belongs to: a name/chart/source key in the same block, just above.
+            indent = len(m.group(1))
+            for prev in reversed(lines[max(0, n - 8):n - 1]):
+                k = NAME_KEYS.match(prev)
+                if k and len(k.group(1)) <= indent:
+                    src = k.group(3).split("?")[0].split("//")[0].rstrip("/")
+                    registry = re.fullmatch(r"[\w-]+/([\w-]+)/[\w-]+", src)   # namespace/NAME/provider
+                    name = registry.group(1) if registry else re.split(r"[/:]", src)[-1]
+                    name = re.sub(r"\.git$", "", name)
+                    if len(name) >= 3:
+                        out.append((name, plain_version(m.group(3)), f, n))
+                    break
+    return out
+
+
+def claims():
+    files = tracked()
+    dirs = {}
+    for f in files:
+        d = os.path.dirname(f)
+        while d:
+            dirs.setdefault(os.path.basename(d).lower(), set()).add(d)
+            d = os.path.dirname(d)
+    found = 0
+    docs = [f for f in files if f.endswith(".md") and not HISTORY.search(f)]
+
+    # Counts: "<number> [up to three words] <folder name>", where the folder exists in the repo.
+    for md in docs:
+        fence = False
+        for n, line in enumerate(open(md, encoding="utf-8", errors="replace"), 1):
+            if line.lstrip().startswith(("```", "~~~")):
+                fence = not fence
+            if fence:
+                continue
+            text = re.sub(r"`[^`]*`|\]\([^)]*\)", " ", line)
+            for m in COUNT.finditer(text):
+                word = m.group(1).lower()
+                said = NUMBER_WORDS.get(word, int(word) if word.isdigit() else None)
+                for noun in m.group(2).split():
+                    noun = noun.lower()
+                    if noun in NOT_A_TOTAL:
+                        break
+                    if noun in dirs and noun.endswith("s"):
+                        counts = {d: children(d) for d in dirs[noun]}
+                        if said not in counts.values():
+                            found += 1
+                            where = ", ".join(f"{d}/ has {c}" for d, c in sorted(counts.items()))
+                            print(f"  {md}:{n}: says {m.group(1)} {noun}; {where}")
+                        break
+
+    # Versions: a pinned name followed closely by a version that does not agree with any pin.
+    by_name = {}
+    for name, ver, f, n in pins(files):
+        by_name.setdefault(name.lower(), []).append((ver, f, n))
+    for md in docs:
+        lines = open(md, encoding="utf-8", errors="replace").read().splitlines()
+        here = os.path.dirname(md)
+        for name, pinned in by_name.items():
+            # A page about one folder (a module's README) answers to that folder's pins when it has any.
+            local = [p for p in pinned if here and p[1].startswith(here + "/")]
+            pinned = local or pinned
+            # The name as a word: "terragrunt" but not "terragrunt.hcl" or "aws-infra".
+            rx = re.compile(r"(?<![\w/.-])" + re.escape(name) + r"(?![\w-]|\.\w)[^\n]{0,20}?(?<![\w.])(" + VERSION + r")(?!\w|\.\w)",
+                            re.IGNORECASE)
+            for n, line in enumerate(lines, 1):
+                for m in rx.finditer(line):
+                    said = plain_version(m.group(1))
+                    if said and not any(same_version(said, v) for v, _, _ in pinned):
+                        found += 1
+                        where = ", ".join(f"{v} ({f}:{ln})" for v, f, ln in pinned[:3])
+                        print(f"  {md}:{n}: says {name} {m.group(1)}; pinned {where}")
+    print(f"claims: {found} count(s) or version(s) in Markdown that disagree with the repo")
+    return found
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "all"
     arg = sys.argv[2] if len(sys.argv) > 2 else None
@@ -229,8 +386,10 @@ def main():
         n = paths()
     elif cmd == "links":
         n = links()
+    elif cmd == "claims":
+        n = claims()
     elif cmd == "all":
-        n = terms(base_ref(arg)) + paths() + links()
+        n = terms(base_ref(arg)) + paths() + links() + claims()
     else:
         sys.stderr.write(__doc__)
         return 2
