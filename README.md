@@ -2,7 +2,7 @@
 
 [![skills.sh](https://skills.sh/b/stv-io/claude-skills)](https://skills.sh/stv-io/claude-skills)
 
-Eight Claude Code skills I use every day: a live status page for long agent runs, a house style for diagrams, and the chores around them. MIT licensed.
+Ten Claude Code skills I use every day: a live status page for long agent runs, a house style for diagrams, catching up on a session and wrapping it up, and the chores around them. MIT licensed.
 
 ## Skills
 
@@ -16,8 +16,10 @@ Eight Claude Code skills I use every day: a live status page for long agent runs
 | [md-toc](skills/md-toc) | Long Markdown documents get a TL;DR, a summary and a table of contents whose links work, on GitHub and in viewers that don't make heading ids (mdserve). Every in-page link is checked. | any | Python 3; `gh` for the optional GitHub check | rewrites the Markdown file you point it at |
 | [docs-sweep](skills/docs-sweep) | Before a change becomes a PR, Claude sweeps the whole repo's docs for everything the change made stale, not only the lines the diff touched. A script finds removed values still mentioned, paths that no longer exist, broken links, and counts or versions in prose that disagree with the repo. | any | Python 3, git | nothing by itself; Claude edits the docs it finds stale |
 | [browser-select](skills/browser-select) | With several browsers connected to Claude in Chrome, Claude asks which one instead of acting in the wrong account. | any | [Claude in Chrome](https://claude.com/chrome) in 2+ browsers, Python 3 | writes `~/.claude/browsers.json` |
+| [whats-up](skills/whats-up) | You come back to a long session and have lost the thread. Claude answers what it's about, where it stands, what's next and what it needs from you, checked against git rather than memory. | any | git; `gh` optional | nothing (read-only) |
+| [wrap-up](skills/wrap-up) | A clean stop before `/exit`: uncommitted and unpushed work settled with you, checks run, loose ends and next steps listed, a summary left in the chat. **Discards only after you type `discard`.** | any | git; `gh` optional | commits you approve; nothing pushed unasked |
 
-None of them use the network themselves, except md-toc's opt-in `--github` check, which sends the file to GitHub's Markdown API.
+None of them use the network themselves, except md-toc's opt-in `--github` check, which sends the file to GitHub's Markdown API, and whats-up and wrap-up, which ask `gh` about the branch's PR when `gh` is installed.
 
 ## Install (30 seconds)
 
@@ -81,6 +83,14 @@ One house style for architecture diagrams on an Excalidraw canvas: colour by rol
 
 Gives each connected browser a name you choose (`work-chrome`, `personal-dia`), makes Claude ask which one to use when you haven't said, and keeps your answer for the session. [Read more →](skills/browser-select)
 
+### whats-up
+
+A longer, checked answer than the built-in one-line `/recap`. **Need from you** first, then what the session is about, its status (done with evidence, in progress, stuck or dropped), and the next step. Where the conversation and the repo disagree, it says so. It's read-only. [Read more →](skills/whats-up)
+
+### wrap-up
+
+Lists uncommitted and unpushed work, background jobs and new TODOs. It runs the repo's checks, then asks for each change: commit, WIP commit, leave or discard. It offers pushes, lessons and next steps but never does them unasked, and ends with a summary block and a verdict on whether `/exit` is safe. It writes no handoff file. [Read more →](skills/wrap-up)
+
 ### md-toc
 
 Claude writes a one-line TL;DR and a short summary. A script builds the table of contents from the headings, writes the matching anchor into each heading so links work even where the viewer makes no heading ids, and checks every `#link` in the file with `file:line` for each broken one. Tests run the output through mdserve, Python-Markdown and GitHub's renderer. [Read more →](skills/md-toc)
@@ -95,7 +105,7 @@ To edit the skills and have changes take effect immediately, clone the repo and 
 
 ```bash
 git clone https://github.com/stv-io/claude-skills.git ~/code/claude-skills
-for s in tracker-page browser-select claude-usage session-export mac-disk-cleanup diagram-style md-toc docs-sweep; do
+for s in tracker-page browser-select claude-usage session-export mac-disk-cleanup diagram-style md-toc docs-sweep whats-up wrap-up; do
   ln -s ~/code/claude-skills/skills/$s ~/.claude/skills/$s
 done
 # Optional: put the CLIs on your PATH
