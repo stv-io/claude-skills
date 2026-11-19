@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""pre-pr-review: gather what a crit review of a change request needs.
+
+  pre-pr-review info [BASE]       JSON: branch, base, merge base, changed files, draft paths, template
+  pre-pr-review crit-args [BASE]  the arguments for `crit`: the description, then every changed file
+  pre-pr-review init [BASE]       create the draft folder; copy the repo's PR template in if there is one
+
+BASE defaults to origin/HEAD, then origin/main, origin/master, main, master. Changed files are
+those that differ between the merge base and the working tree, so uncommitted edits count, and
+untracked files that are not ignored are included. Deleted files are listed in `info` but not in
+`crit-args`: crit cannot open a file that is gone.
+
+The draft lives in the git dir (`.git/pre-pr-review/`, or the worktree's own git dir), so it is
+never committed and each worktree has its own. Run from inside the repo.
+
+Exit code 2 when git fails (a bad BASE, not a repo). Only `init` writes anything, and only
+inside the git dir.
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+TEMPLATES = (
+    ".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE.md",
+    "pull_request_template.md", "PULL_REQUEST_TEMPLATE.md",
+    "docs/pull_request_template.md", ".bitbucket/pull_request_template.md",
+)
+TEMPLATE_DIRS = (".github/PULL_REQUEST_TEMPLATE", ".gitlab/merge_request_templates")
+
+
+def git(*args, ok=(0,)):
+    p = subprocess.run(["git", *args], capture_output=True, text=True)
+    if p.returncode not in ok:
+        sys.stderr.write(f"pre-pr-review: git {' '.join(args)} failed: {p.stderr.strip()}\n")
+        sys.exit(2)
+    return p.stdout
+
+
+def default_base():
+    for ref in ("origin/HEAD", "origin/main", "origin/master", "main", "master"):
+        if subprocess.run(["git", "rev-parse", "--verify", "-q", ref], capture_output=True).returncode == 0:
+            if ref == "origin/HEAD":
+                return git("rev-parse", "--abbrev-ref", "origin/HEAD").strip()
+            return ref
+    sys.stderr.write("pre-pr-review: no base found (origin/HEAD, origin/main, origin/master, main, master); pass BASE\n")
+    sys.exit(2)
+
+
+def forge(url):
+    if "github" in url:
+        return "github"
+    if "bitbucket" in url:
+        return "bitbucket"
+    if "gitlab" in url or "gl." in url:
+        return "gitlab"
+    return "unknown"
+
+
+def template(top):
+    for t in TEMPLATES:
+        if os.path.isfile(os.path.join(top, t)):
+            return [t]
+    found = []
+    for d in TEMPLATE_DIRS:
+        p = os.path.join(top, d)
+        if os.path.isdir(p):
+            found += sorted(os.path.join(d, f) for f in os.listdir(p) if f.endswith(".md"))
+    return found
+
+
+def collect(base_arg):
+    top = git("rev-parse", "--show-toplevel").strip()
+    os.chdir(top)
+    base = base_arg or default_base()
+    mb = git("merge-base", base, "HEAD").strip()
+    changed, deleted = [], []
+    for line in git("diff", "--name-status", "-M", mb).splitlines():
+        parts = line.split("\t")
+        st = parts[0][0]
+        if st == "D":
+            deleted.append(parts[1])
+        elif st == "R":
+            deleted.append(parts[1])
+            changed.append({"path": parts[2], "status": "renamed", "from": parts[1]})
+        else:
+            changed.append({"path": parts[-1], "status": {"A": "added", "M": "modified"}.get(st, st)})
+    for p in git("ls-files", "--others", "--exclude-standard").splitlines():
+        changed.append({"path": p, "status": "untracked"})
+    draft = os.path.join(os.path.abspath(git("rev-parse", "--git-dir").strip()), "pre-pr-review")
+    remote = git("remote", "get-url", "origin", ok=(0, 2)).strip()
+    dirty = bool(git("status", "--porcelain", "--untracked-files=normal").strip())
+    return {
+        "repo": top,
+        "branch": git("rev-parse", "--abbrev-ref", "HEAD").strip(),
+        "base": base,
+        "merge_base": mb,
+        "commits": git("log", "--oneline", f"{mb}..HEAD").splitlines(),
+        "uncommitted": dirty,
+        "remote": remote,
+        "forge": forge(remote),
+        "changed": changed,
+        "deleted": deleted,
+        "draft_dir": draft,
+        "description": os.path.join(draft, "description.md"),
+        "assets_dir": os.path.join(draft, "assets"),
+        "templates": template(top),
+    }
+
+
+def main(argv):
+    if len(argv) < 2 or argv[1] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0
+    cmd, base = argv[1], (argv[2] if len(argv) > 2 else None)
+    if cmd not in ("info", "crit-args", "init"):
+        sys.stderr.write(f"pre-pr-review: unknown command {cmd!r}\n")
+        return 2
+    i = collect(base)
+    if cmd == "info":
+        print(json.dumps(i, indent=2))
+    elif cmd == "crit-args":
+        for a in [i["description"]] + [c["path"] for c in i["changed"]]:
+            print(a)
+    else:  # init
+        os.makedirs(i["assets_dir"], exist_ok=True)
+        if not os.path.exists(i["description"]):
+            if len(i["templates"]) == 1:
+                shutil.copyfile(os.path.join(i["repo"], i["templates"][0]), i["description"])
+                print(f"created {i['description']} from {i['templates'][0]}")
+            else:
+                open(i["description"], "w").close()
+                print(f"created {i['description']} (empty"
+                      + (f"; {len(i['templates'])} templates to choose from" if i["templates"] else "") + ")")
+        else:
+            print(f"kept {i['description']} (already there)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

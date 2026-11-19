@@ -2,7 +2,7 @@
 
 [![skills.sh](https://skills.sh/b/stv-io/claude-skills)](https://skills.sh/stv-io/claude-skills)
 
-Ten Claude Code skills I use every day: a live status page for long agent runs, a house style for diagrams, catching up on a session and wrapping it up, and the chores around them. MIT licensed.
+Eleven Claude Code skills I use every day: a live status page for long agent runs, a house style for diagrams, catching up on a session and wrapping it up, reviewing a PR before anyone else sees it, and the chores around them. MIT licensed.
 
 ## Skills
 
@@ -15,6 +15,7 @@ Ten Claude Code skills I use every day: a live status page for long agent runs, 
 | [diagram-style](skills/diagram-style) | Diagrams Claude draws look like one consistent set instead of a different sketch each time: colour by role, one font, title as the conclusion. | any | Python 3; an [Excalidraw canvas](https://github.com/yctimlin/mcp_excalidraw) to draw on | writes the figures you ask for |
 | [md-toc](skills/md-toc) | Long Markdown documents get a TL;DR, a summary and a table of contents whose links work, on GitHub and in viewers that don't make heading ids (mdserve). Every in-page link is checked. | any | Python 3; `gh` for the optional GitHub check | rewrites the Markdown file you point it at |
 | [docs-sweep](skills/docs-sweep) | Before a change becomes a PR, Claude sweeps the whole repo's docs for everything the change made stale, not only the lines the diff touched. A script finds removed values still mentioned, paths that no longer exist, broken links, and counts or versions in prose that disagree with the repo. | any | Python 3, git | nothing by itself; Claude edits the docs it finds stale |
+| [pre-pr-review](skills/pre-pr-review) | Before a change request goes to a shared repo, you review its description and every changed file together in crit, and Claude revises until you approve. **Runs only when you invoke it.** | any | Python 3, git, [crit](https://crit.md) | writes a draft to `.git/pre-pr-review/`; crit serves 127.0.0.1 |
 | [browser-select](skills/browser-select) | With several browsers connected to Claude in Chrome, Claude asks which one instead of acting in the wrong account. | any | [Claude in Chrome](https://claude.com/chrome) in 2+ browsers, Python 3 | writes `~/.claude/browsers.json` |
 | [whats-up](skills/whats-up) | You come back to a long session and have lost the thread. Claude answers what it's about, where it stands, what's next and what it needs from you, checked against git rather than memory. | any | git; `gh` optional | nothing (read-only) |
 | [wrap-up](skills/wrap-up) | A clean stop before `/exit`: uncommitted and unpushed work settled with you, checks run, loose ends and next steps listed, a summary left in the chat. **Discards only after you type `discard`.** | any | git; `gh` optional | commits you approve; nothing pushed unasked |
@@ -99,13 +100,17 @@ Claude writes a one-line TL;DR and a short summary. A script builds the table of
 
 Before a branch becomes a PR, Claude lists what the change changed (names, numbers, behaviour, what exists, what is built) and sweeps the whole repo for docs it made untrue: README status lines, layout trees, counts in prose, "not built yet" lists, comments elsewhere that say "keep in step with". A script finds removed values the repo still mentions, Markdown paths that don't exist, broken links, and counts or versions in prose that disagree with the repo (`seven skills` when there are eight, `Terraform 1.9` when it pins 1.12); Claude judges each hit, fixes the stale ones with the smallest edit, leaves history pages alone and reports what it found that the change didn't cause. [Read more →](skills/docs-sweep)
 
+### pre-pr-review
+
+You run `/pre-pr-review` before opening a PR or MR. Claude drafts the description from the repo's template and opens one crit session: the description first, then each changed file as a diff against the base, uncommitted edits included. You comment, Claude edits the text or the code and replies in crit, round after round, until you finish one with no comments. Then you get the exact `gh`, `glab` or `bkt` command with the approved text as the body. Claude never starts it on its own, so personal repos are untouched. [Read more →](skills/pre-pr-review)
+
 ## Hacking on these
 
 To edit the skills and have changes take effect immediately, clone the repo and symlink the folders instead of installing copies:
 
 ```bash
 git clone https://github.com/stv-io/claude-skills.git ~/code/claude-skills
-for s in tracker-page browser-select claude-usage session-export mac-disk-cleanup diagram-style md-toc docs-sweep whats-up wrap-up; do
+for s in tracker-page browser-select claude-usage session-export mac-disk-cleanup diagram-style md-toc docs-sweep pre-pr-review whats-up wrap-up; do
   ln -s ~/code/claude-skills/skills/$s ~/.claude/skills/$s
 done
 # Optional: put the CLIs on your PATH
@@ -115,11 +120,12 @@ ln -s ~/code/claude-skills/skills/claude-usage/bin/claude-usage-capture ~/.local
 ln -s ~/code/claude-skills/skills/session-export/bin/session-export     ~/.local/bin/session-export
 ln -s ~/code/claude-skills/skills/md-toc/bin/md-toc                     ~/.local/bin/md-toc
 ln -s ~/code/claude-skills/skills/docs-sweep/bin/docs-sweep             ~/.local/bin/docs-sweep
+ln -s ~/code/claude-skills/skills/pre-pr-review/bin/pre-pr-review     ~/.local/bin/pre-pr-review
 ```
 
 Don't run `npx skills add` over these symlinks: it replaces them with copies without asking.
 
-tracker-page, md-toc and docs-sweep have tests (`uv` is all you need); see [tracker-page's SKILL.md](skills/tracker-page/SKILL.md#changing-the-scripts), [md-toc's README](skills/md-toc/README.md#tests) and [docs-sweep's README](skills/docs-sweep/README.md#tests).
+tracker-page, md-toc, docs-sweep and pre-pr-review have tests (`uv` is all you need); see [tracker-page's SKILL.md](skills/tracker-page/SKILL.md#changing-the-scripts), [md-toc's README](skills/md-toc/README.md#tests), [docs-sweep's README](skills/docs-sweep/README.md#tests) and [pre-pr-review's README](skills/pre-pr-review/README.md#tests).
 
 ## License
 
