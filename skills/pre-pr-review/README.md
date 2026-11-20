@@ -21,7 +21,11 @@ BASE defaults to origin/HEAD, then origin/main, origin/master, main, master. Cha
 
 - Deleted files don't appear in crit, because there's nothing to open. The description names them instead.
 - crit labels new files "modified" in its file list. The diff is still correct.
-- Local images in the description probably don't render in crit, and forges won't take local paths either. Claude lists the attachments for you to drag into the PR once it exists.
+- Images in the description render in crit, but forges won't take local paths. Claude lists the attachments for you to drag into the PR once it exists.
+
+## Running it automatically (not built)
+
+v1 runs only when you invoke it. [docs/v2-plan.md](docs/v2-plan.md) holds the parked design for making it a default in shared repos: repo classes (on, off, ask), a size test so small changes skip it, and a hook on PR creation. [tools/classify/](tools/classify) builds a local page for sorting your repos into those classes.
 
 ## Tests
 
