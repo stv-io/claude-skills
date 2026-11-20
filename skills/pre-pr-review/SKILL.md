@@ -90,9 +90,9 @@ Tested with crit 1.8.0:
   under `deleted`, and the description must name them.
 - **New files are labelled "modified"** in crit's file list. That's cosmetic, and the diff is
   still correct.
-- **Images in the description:** crit's image handling is for comment attachments. A relative
-  image link in the description probably won't render. Check by eye the first time, and if it
-  doesn't render, point the user at the file in `assets_dir`.
+- **Images in the description render.** crit rewrites a relative image link in a reviewed
+  markdown file to its `/files/` endpoint, relative to that file. It serves files from inside
+  `.git/`, so `![plan](assets/plan.png)` in the description shows the file in `assets_dir`.
 
 ## Afterwards
 
